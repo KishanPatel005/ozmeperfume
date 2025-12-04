@@ -16,8 +16,9 @@ import policyRoutes from './routes/policyRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 
+// Admin Routes
+import adminAuthRoutes from './routes/adminAuthRoutes.js';
 import adminProductRoutes from './routes/adminProductRoutes.js';
-import adminDashboardRoutes from './routes/adminDashboardRoutes.js';
 import adminOrderRoutes from './routes/adminOrderRoutes.js';
 import adminDashboardRoutes from './routes/adminDashboardRoutes.js';
 import adminCouponRoutes from './routes/adminCouponRoutes.js';
@@ -100,3 +101,4 @@ app.listen(PORT, () => {
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
+ // Trigger restart
