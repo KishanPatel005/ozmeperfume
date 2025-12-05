@@ -1,85 +1,83 @@
 import { Plus, Edit, Trash2, Search, Package, TrendingUp, AlertCircle, Filter, ArrowLeft } from 'lucide-react';
-import { useState } from 'react';
-
-// Sample product data
-const initialProducts = [
-  {
-    id: 1,
-    name: 'Wireless Headphones',
-    sku: 'WH-001',
-    category: 'Electronics',
-    brand: 'AudioTech',
-    price: 99.99,
-    discount: 10,
-    stock: 45,
-    status: 'Active',
-    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=200&h=200&fit=crop'
-  },
-  {
-    id: 2,
-    name: 'Smart Watch',
-    sku: 'SW-002',
-    category: 'Electronics',
-    brand: 'TechWear',
-    price: 299.99,
-    discount: 15,
-    stock: 23,
-    status: 'Active',
-    image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200&h=200&fit=crop'
-  },
-  {
-    id: 3,
-    name: 'Laptop Stand',
-    sku: 'LS-003',
-    category: 'Accessories',
-    brand: 'DeskPro',
-    price: 49.99,
-    discount: 0,
-    stock: 67,
-    status: 'Active',
-    image: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=200&h=200&fit=crop'
-  },
-  {
-    id: 4,
-    name: 'USB-C Hub',
-    sku: 'UH-004',
-    category: 'Accessories',
-    brand: 'ConnectPlus',
-    price: 39.99,
-    discount: 5,
-    stock: 12,
-    status: 'Low Stock',
-    image: 'https://images.unsplash.com/photo-1625948515291-69613efd103f?w=200&h=200&fit=crop'
-  },
-  {
-    id: 5,
-    name: 'Mechanical Keyboard',
-    sku: 'MK-005',
-    category: 'Electronics',
-    brand: 'KeyMaster',
-    price: 129.99,
-    discount: 20,
-    stock: 34,
-    status: 'Active',
-    image: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=200&h=200&fit=crop'
-  }
-];
+import { useState, useEffect } from 'react';
+import { apiRequest } from '../utils/api';
 
 const Products = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [products, setProducts] = useState(initialProducts);
+  const [products, setProducts] = useState([]);
   const [editingProduct, setEditingProduct] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch products from backend
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await apiRequest('/admin/products');
+      
+      if (response && response.success) {
+        // Transform backend products to match frontend format
+        const transformedProducts = response.data.products.map(product => ({
+          id: product._id,
+          _id: product._id,
+          name: product.name,
+          sku: product._id.slice(-8).toUpperCase(), // Use last 8 chars of ID as SKU
+          category: product.category,
+          brand: 'OZME', // Default brand
+          price: product.price,
+          originalPrice: product.originalPrice || product.price,
+          discount: product.originalPrice ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100) : 0,
+          stock: product.stockQuantity || 0,
+          status: !product.active ? 'Out of Stock' : (product.stockQuantity < 20 ? 'Low Stock' : 'Active'),
+          image: product.images?.[0] || '',
+          images: product.images || [],
+          description: product.description,
+          gender: product.gender,
+          inStock: product.inStock,
+          active: product.active,
+        }));
+        setProducts(transformedProducts);
+      } else {
+        setError('Failed to fetch products');
+      }
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      setError(err.message || 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const handleDelete = (productId) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
-      setProducts(products.filter(p => p.id !== productId));
+  const handleDelete = async (productId) => {
+    if (!window.confirm('Are you sure you want to delete this product?')) {
+      return;
+    }
+
+    try {
+      const response = await apiRequest(`/admin/products/${productId}`, {
+        method: 'DELETE',
+      });
+
+      if (response && response.success) {
+        setProducts(products.filter(p => p.id !== productId && p._id !== productId));
+      } else {
+        alert(response?.message || 'Failed to delete product');
+      }
+    } catch (err) {
+      console.error('Error deleting product:', err);
+      alert(err.message || 'Failed to delete product');
     }
   };
 
@@ -105,8 +103,52 @@ const Products = () => {
   // Stats calculation
   const stats = {
     total: products.length,
-    lowStock: products.filter(p => p.stock < 20).length,
-    totalValue: products.reduce((sum, p) => sum + (p.price * p.stock), 0)
+    lowStock: products.filter(p => (p.stock || 0) < 20 && p.active).length,
+    totalValue: products.reduce((sum, p) => sum + ((p.price || 0) * (p.stock || 0)), 0)
+  };
+
+  const handleSave = async (productData) => {
+    try {
+      const productPayload = {
+        name: productData.name,
+        description: productData.description || productData.name,
+        price: parseFloat(productData.price),
+        originalPrice: productData.discount > 0 ? parseFloat(productData.price) / (1 - productData.discount / 100) : parseFloat(productData.price),
+        images: productData.image ? [productData.image] : [],
+        category: productData.category,
+        gender: productData.gender || 'Unisex',
+        stockQuantity: parseInt(productData.stock) || 0,
+        inStock: productData.stock > 0,
+        active: productData.status !== 'Out of Stock',
+      };
+
+      let response;
+      if (editingProduct) {
+        // Update existing product
+        response = await apiRequest(`/admin/products/${editingProduct._id || editingProduct.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(productPayload),
+        });
+      } else {
+        // Create new product
+        response = await apiRequest('/admin/products', {
+          method: 'POST',
+          body: JSON.stringify(productPayload),
+        });
+      }
+
+      if (response && response.success) {
+        // Refresh products list
+        await fetchProducts();
+        setShowAddForm(false);
+        setEditingProduct(null);
+      } else {
+        alert(response?.message || 'Failed to save product');
+      }
+    } catch (err) {
+      console.error('Error saving product:', err);
+      alert(err.message || 'Failed to save product');
+    }
   };
 
   if (showAddForm) {
@@ -116,16 +158,37 @@ const Products = () => {
         setEditingProduct(null);
       }} 
       editingProduct={editingProduct}
-      onSave={(product) => {
-        if (editingProduct) {
-          setProducts(products.map(p => p.id === product.id ? product : p));
-        } else {
-          setProducts([...products, { ...product, id: products.length + 1 }]);
-        }
-        setShowAddForm(false);
-        setEditingProduct(null);
-      }}
+      onSave={handleSave}
     />;
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading products...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && products.length === 0) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+          <button
+            onClick={fetchProducts}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -222,7 +285,7 @@ const Products = () => {
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Product</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Category</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Brand</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Gender</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Price</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Discount</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stock</th>
@@ -242,7 +305,7 @@ const Products = () => {
                       />
                       <div className="ml-4">
                         <div className="text-sm font-semibold text-gray-900 dark:text-white">{product.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{product.sku}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{product.sku || product._id?.slice(-8).toUpperCase()}</div>
                       </div>
                     </div>
                   </td>
@@ -250,17 +313,17 @@ const Products = () => {
                     {product.category}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    {product.brand}
+                    {product.gender || 'Unisex'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
-                    ${product.price}
+                    ₹{product.price?.toLocaleString('en-IN') || '0'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                     {product.discount > 0 ? `${product.discount}%` : '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    <span className={product.stock < 20 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
-                      {product.stock}
+                    <span className={(product.stock || 0) < 20 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
+                      {product.stock || 0}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -276,7 +339,7 @@ const Products = () => {
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => handleDelete(product.id)}
+                        onClick={() => handleDelete(product._id || product.id)}
                         className="p-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
                         title="Delete product"
                       >
@@ -296,21 +359,33 @@ const Products = () => {
 
 // Add/Edit Product Form Component
 const AddProductForm = ({ onBack, editingProduct, onSave }) => {
-  const [formData, setFormData] = useState(editingProduct || {
+  const [formData, setFormData] = useState(editingProduct ? {
+    name: editingProduct.name || '',
+    description: editingProduct.description || '',
+    category: editingProduct.category || '',
+    gender: editingProduct.gender || 'Unisex',
+    price: editingProduct.price || '',
+    originalPrice: editingProduct.originalPrice || editingProduct.price || '',
+    discount: editingProduct.discount || 0,
+    stock: editingProduct.stock || editingProduct.stockQuantity || '',
+    status: editingProduct.status || (editingProduct.active ? 'Active' : 'Out of Stock'),
+    image: editingProduct.image || editingProduct.images?.[0] || '',
+  } : {
     name: '',
-    sku: '',
+    description: '',
     category: '',
-    brand: '',
+    gender: 'Unisex',
     price: '',
+    originalPrice: '',
     discount: 0,
     stock: '',
     status: 'Active',
-    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=200&h=200&fit=crop'
+    image: ''
   });
 
   const handleSave = () => {
-    if (!formData.name || !formData.sku || !formData.category || !formData.brand || !formData.price || !formData.stock) {
-      alert('Please fill in all required fields');
+    if (!formData.name || !formData.category || !formData.price || formData.stock === '') {
+      alert('Please fill in all required fields (Name, Category, Price, Stock)');
       return;
     }
     onSave(formData);
@@ -367,13 +442,13 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                  SKU *
+                  Description *
                 </label>
-                <input
-                  type="text"
-                  value={formData.sku}
-                  onChange={(e) => handleChange('sku', e.target.value)}
-                  placeholder="Product SKU"
+                <textarea
+                  value={formData.description || ''}
+                  onChange={(e) => handleChange('description', e.target.value)}
+                  placeholder="Enter product description"
+                  rows={4}
                   className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
                 />
               </div>
@@ -389,31 +464,34 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
                     className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
                   >
                     <option value="">Select Category</option>
-                    <option value="Electronics">Electronics</option>
-                    <option value="Accessories">Accessories</option>
-                    <option value="Clothing">Clothing</option>
-                    <option value="Home & Garden">Home & Garden</option>
+                    <option value="Oriental">Oriental</option>
+                    <option value="Floral">Floral</option>
+                    <option value="Woody">Woody</option>
+                    <option value="Fresh">Fresh</option>
+                    <option value="Limited Edition">Limited Edition</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Brand *
+                    Gender *
                   </label>
-                  <input
-                    type="text"
-                    value={formData.brand}
-                    onChange={(e) => handleChange('brand', e.target.value)}
-                    placeholder="Brand name"
+                  <select
+                    value={formData.gender || 'Unisex'}
+                    onChange={(e) => handleChange('gender', e.target.value)}
                     className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
-                  />
+                  >
+                    <option value="Men">Men</option>
+                    <option value="Women">Women</option>
+                    <option value="Unisex">Unisex</option>
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Price ($) *
+                    Price (₹) *
                   </label>
                   <input
                     type="number"

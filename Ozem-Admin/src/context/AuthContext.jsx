@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { apiRequest } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -6,29 +7,74 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const token = localStorage.getItem('adminToken');
-    if (token) {
-      // TODO: Verify token with backend
-      setUser({ email: 'admin@example.com' });
+  /**
+   * Check authentication status on app load
+   */
+  const checkAuth = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      const response = await apiRequest('/admin/auth/me');
+      if (response && response.success) {
+        setUser(response.data.user);
+      } else {
+        // Invalid token or backend unavailable
+        localStorage.removeItem('adminToken');
+        setUser(null);
+      }
+    } catch (error) {
+      console.error('Auth check error:', error);
+      localStorage.removeItem('adminToken');
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  useEffect(() => {
+    checkAuth();
   }, []);
 
   const login = async (email, password) => {
-    // This would be replaced with actual API call
-    if (email === 'admin@example.com' && password === 'admin123') {
-      const token = 'dummy-jwt-token';
-      localStorage.setItem('adminToken', token);
-      setUser({ email });
-      return true;
+    try {
+      const response = await apiRequest('/admin/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response && response.success) {
+        const token = response.data.token;
+        localStorage.setItem('adminToken', token);
+        setUser(response.data.user);
+        return true;
+      } else {
+        throw new Error(response?.message || 'Login failed');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      throw new Error(error.message || 'Failed to login. Please check your credentials.');
     }
-    throw new Error('Invalid credentials');
   };
 
-  const logout = () => {
-    localStorage.removeItem('adminToken');
-    setUser(null);
+  const logout = async () => {
+    try {
+      // Call backend logout endpoint if token exists
+      const token = localStorage.getItem('adminToken');
+      if (token) {
+        await apiRequest('/admin/auth/logout', {
+          method: 'POST',
+        });
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('adminToken');
+      setUser(null);
+    }
   };
 
   return (

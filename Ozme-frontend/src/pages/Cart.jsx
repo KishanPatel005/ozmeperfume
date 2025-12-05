@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
+import { apiRequest } from '../utils/api';
 import {
     ShoppingCart,
     Trash2,
@@ -19,28 +21,77 @@ import {
 export default function CartPage() {
     const navigate = useNavigate();
     const { cart, updateQuantity, removeFromCart } = useCart();
+    const { isAuthenticated } = useAuth();
     const [promoCode, setPromoCode] = useState('');
     const [appliedPromoCode, setAppliedPromoCode] = useState(null);
+    const [promoCodeDiscount, setPromoCodeDiscount] = useState(0);
+    const [promoCodeData, setPromoCodeData] = useState(null);
+    const [isValidatingPromo, setIsValidatingPromo] = useState(false);
 
     const handleCheckout = () => {
         navigate('/checkout');
     };
 
-    const handleApplyPromoCode = () => {
-        const code = promoCode.trim().toLowerCase();
-        if (code === 'ozme10') {
-            setAppliedPromoCode('ozme10');
-            setPromoCode('');
-            toast.success('Promo code applied successfully!');
-        } else if (code === '') {
+    const handleApplyPromoCode = async () => {
+        const code = promoCode.trim();
+        
+        if (!code) {
             toast.error('Please enter a promo code');
-        } else {
-            toast.error('Invalid promo code');
+            return;
+        }
+
+        // Check if user is authenticated (required for backend validation)
+        if (!isAuthenticated) {
+            toast.error('Please login to apply promo codes');
+            navigate('/login', { state: { from: '/cart' } });
+            return;
+        }
+
+        setIsValidatingPromo(true);
+
+        try {
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const shippingCost = 0;
+            const orderAmount = subtotal + shippingCost;
+
+            // Call backend API to validate coupon
+            const response = await apiRequest('/coupons/validate', {
+                method: 'POST',
+                body: JSON.stringify({
+                    code: code.toUpperCase(),
+                    orderAmount: orderAmount,
+                }),
+            });
+
+            if (response && response.success) {
+                setAppliedPromoCode(code.toUpperCase());
+                setPromoCodeDiscount(response.data.discountAmount || 0);
+                setPromoCodeData(response.data);
+                setPromoCode('');
+                toast.success(`Promo code "${code.toUpperCase()}" applied successfully!`);
+            } else {
+                const errorMessage = response?.message || 'Invalid promo code';
+                toast.error(errorMessage);
+                setAppliedPromoCode(null);
+                setPromoCodeDiscount(0);
+                setPromoCodeData(null);
+            }
+        } catch (error) {
+            console.error('Promo code validation error:', error);
+            const errorMessage = error.message || error.response?.data?.message || 'Failed to validate promo code';
+            toast.error(errorMessage);
+            setAppliedPromoCode(null);
+            setPromoCodeDiscount(0);
+            setPromoCodeData(null);
+        } finally {
+            setIsValidatingPromo(false);
         }
     };
 
     const handleRemovePromoCode = () => {
         setAppliedPromoCode(null);
+        setPromoCodeDiscount(0);
+        setPromoCodeData(null);
         toast.success('Promo code removed');
     };
     // Hero Section
@@ -89,7 +140,7 @@ export default function CartPage() {
     const savings = cart.reduce((sum, item) => sum + ((item.originalPrice - item.price) * item.quantity), 0);
     const shippingCost = 0; // Free shipping for all orders
     const cartTotalBeforeDiscount = subtotal + shippingCost;
-    const discountAmount = appliedPromoCode === 'ozme10' ? Math.round(cartTotalBeforeDiscount * 0.1) : 0;
+    const discountAmount = promoCodeDiscount || 0; // Use backend calculated discount
     const total = cartTotalBeforeDiscount - discountAmount;
 
     // Empty State
@@ -351,9 +402,10 @@ export default function CartPage() {
                                             />
                                             <button
                                                 onClick={handleApplyPromoCode}
-                                                className="px-4 sm:px-6 py-2 text-xs sm:text-sm bg-gray-900 text-white font-semibold rounded-lg hover:bg-gray-800 transition-all duration-300 whitespace-nowrap"
+                                                disabled={isValidatingPromo || !promoCode.trim()}
+                                                className="px-4 sm:px-6 py-2 text-xs sm:text-sm bg-gray-900 text-white font-semibold rounded-lg hover:bg-gray-800 transition-all duration-300 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                Apply
+                                                {isValidatingPromo ? 'Validating...' : 'Apply'}
                                             </button>
                                         </div>
                                     )}

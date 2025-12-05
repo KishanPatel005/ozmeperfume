@@ -1,148 +1,150 @@
 import { Eye, Search, Filter, Package, Clock, CheckCircle, XCircle } from 'lucide-react';
-import { useState } from 'react';
-
-// Sample orders data
-const orders = [
-  {
-    id: 'ORD-001',
-    customer: 'John Doe',
-    email: 'john@example.com',
-    phone: '+1 234 567 8900',
-    amount: 299.99,
-    paymentMethod: 'Credit Card',
-    status: 'Delivered',
-    date: '2024-03-15',
-    items: [
-      { name: 'Wireless Headphones', qty: 1, price: 99.99 },
-      { name: 'Smart Watch', qty: 1, price: 199.99 }
-    ],
-    subtotal: 299.99,
-    shipping: 0,
-    discount: 0,
-    shippingAddress: '123 Main St, New York, NY 10001',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-15 10:30 AM', completed: true },
-      { status: 'Processing', date: '2024-03-15 11:00 AM', completed: true },
-      { status: 'Shipped', date: '2024-03-16 09:00 AM', completed: true },
-      { status: 'Delivered', date: '2024-03-18 02:30 PM', completed: true }
-    ]
-  },
-  {
-    id: 'ORD-002',
-    customer: 'Jane Smith',
-    email: 'jane@example.com',
-    phone: '+1 234 567 8901',
-    amount: 149.99,
-    paymentMethod: 'PayPal',
-    status: 'Shipped',
-    date: '2024-03-18',
-    items: [
-      { name: 'Laptop Stand', qty: 2, price: 49.99 },
-      { name: 'USB-C Hub', qty: 1, price: 39.99 }
-    ],
-    subtotal: 139.98,
-    shipping: 10.00,
-    discount: 0,
-    shippingAddress: '456 Oak Ave, Los Angeles, CA 90001',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-18 02:15 PM', completed: true },
-      { status: 'Processing', date: '2024-03-18 03:00 PM', completed: true },
-      { status: 'Shipped', date: '2024-03-19 10:00 AM', completed: true },
-      { status: 'Delivered', date: null, completed: false }
-    ]
-  },
-  {
-    id: 'ORD-003',
-    customer: 'Mike Johnson',
-    email: 'mike@example.com',
-    phone: '+1 234 567 8902',
-    amount: 129.99,
-    paymentMethod: 'Credit Card',
-    status: 'Processing',
-    date: '2024-03-20',
-    items: [
-      { name: 'Mechanical Keyboard', qty: 1, price: 129.99 }
-    ],
-    subtotal: 129.99,
-    shipping: 0,
-    discount: 0,
-    shippingAddress: '789 Pine St, Chicago, IL 60601',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-20 11:45 AM', completed: true },
-      { status: 'Processing', date: '2024-03-20 12:00 PM', completed: true },
-      { status: 'Shipped', date: null, completed: false },
-      { status: 'Delivered', date: null, completed: false }
-    ]
-  },
-  {
-    id: 'ORD-004',
-    customer: 'Sarah Wilson',
-    email: 'sarah@example.com',
-    phone: '+1 234 567 8903',
-    amount: 349.98,
-    paymentMethod: 'Credit Card',
-    status: 'Pending',
-    date: '2024-03-21',
-    items: [
-      { name: 'Smart Watch', qty: 1, price: 299.99 },
-      { name: 'USB-C Hub', qty: 1, price: 39.99 }
-    ],
-    subtotal: 339.98,
-    shipping: 10.00,
-    discount: 0,
-    shippingAddress: '321 Elm St, Miami, FL 33101',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-21 09:30 AM', completed: true },
-      { status: 'Processing', date: null, completed: false },
-      { status: 'Shipped', date: null, completed: false },
-      { status: 'Delivered', date: null, completed: false }
-    ]
-  },
-  {
-    id: 'ORD-005',
-    customer: 'Tom Brown',
-    email: 'tom@example.com',
-    phone: '+1 234 567 8904',
-    amount: 99.99,
-    paymentMethod: 'PayPal',
-    status: 'Canceled',
-    date: '2024-03-19',
-    items: [
-      { name: 'Wireless Headphones', qty: 1, price: 99.99 }
-    ],
-    subtotal: 99.99,
-    shipping: 0,
-    discount: 0,
-    shippingAddress: '654 Maple Dr, Seattle, WA 98101',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-19 03:20 PM', completed: true },
-      { status: 'Canceled', date: '2024-03-19 04:00 PM', completed: true }
-    ]
-  }
-];
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { apiRequest } from '../utils/api';
 
 const Orders = ({ onViewOrder }) => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch orders from backend
+  useEffect(() => {
+    fetchOrders();
+  }, [statusFilter]);
+
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (statusFilter && statusFilter !== 'All') {
+        params.append('status', statusFilter);
+      }
+      
+      const queryString = params.toString();
+      const endpoint = `/admin/orders${queryString ? '?' + queryString : ''}`;
+      
+      const response = await apiRequest(endpoint);
+      
+      if (response && response.success) {
+        // Transform backend orders to match frontend format
+        const transformedOrders = response.data.orders.map(order => {
+          const orderNumber = `OZME-${order._id.toString().slice(-8).toUpperCase()}`;
+          
+          return {
+            id: orderNumber,
+            _id: order._id,
+            orderNumber: orderNumber,
+            customer: order.user?.name || 'Guest',
+            email: order.user?.email || order.shippingAddress?.email || '',
+            phone: order.shippingAddress?.phone || '',
+            amount: order.totalAmount || 0,
+            paymentMethod: order.paymentMethod === 'Prepaid' ? 'Online' : 'COD',
+            status: order.orderStatus || 'Pending',
+            paymentStatus: order.paymentStatus || 'Pending',
+            date: order.createdAt || new Date().toISOString(),
+            items: order.items?.map(item => ({
+              name: item.product?.name || 'Product',
+              qty: item.quantity || 1,
+              price: item.price || 0,
+              size: item.size || '100ml'
+            })) || [],
+            subtotal: order.totalAmount + (order.discountAmount || 0),
+            shipping: 0,
+            discount: order.discountAmount || 0,
+            shippingAddress: order.shippingAddress ? 
+              `${order.shippingAddress.address || ''}, ${order.shippingAddress.city || ''}, ${order.shippingAddress.state || ''} ${order.shippingAddress.pincode || ''}`.trim() :
+              '',
+            trackingNumber: order.trackingNumber,
+            timeline: generateTimeline(order),
+            backendOrder: order, // Keep original for detailed view
+          };
+        });
+        setOrders(transformedOrders);
+      } else {
+        setError('Failed to fetch orders');
+      }
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      setError(err.message || 'Failed to load orders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generate timeline from order status
+  const generateTimeline = (order) => {
+    const timeline = [];
+    const statusOrder = ['Pending', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered'];
+    const currentStatus = order.orderStatus || 'Pending';
+    const currentIndex = statusOrder.indexOf(currentStatus);
+    
+    statusOrder.forEach((status, index) => {
+      const isCompleted = index <= currentIndex || currentStatus === 'Cancelled';
+      timeline.push({
+        status: status,
+        date: isCompleted ? (order.updatedAt || order.createdAt) : null,
+        completed: isCompleted && currentStatus !== 'Cancelled',
+      });
+    });
+    
+    if (currentStatus === 'Cancelled') {
+      timeline.push({
+        status: 'Cancelled',
+        date: order.updatedAt || order.createdAt,
+        completed: true,
+      });
+    }
+    
+    return timeline;
+  };
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customer.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
+      order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (order.trackingNumber && order.trackingNumber.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesStatus = statusFilter === 'All' || order.status === statusFilter || (statusFilter === 'Canceled' && order.status === 'Cancelled');
     return matchesSearch && matchesStatus;
   });
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const handleViewOrder = (order) => {
+    if (onViewOrder) {
+      onViewOrder(order.id);
+    } else {
+      navigate(`/orders/${order._id || order.id}`);
+    }
+  };
 
   const getStatusBadge = (status) => {
     const statusStyles = {
       'Delivered': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
       'Shipped': 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
+      'Out for Delivery': 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-800',
       'Processing': 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800',
       'Pending': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
+      'Cancelled': 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800',
       'Canceled': 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800',
     };
     
     return (
-      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${statusStyles[status]}`}>
+      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${statusStyles[status] || statusStyles['Pending']}`}>
         {status}
       </span>
     );
@@ -154,8 +156,37 @@ const Orders = ({ onViewOrder }) => {
     pending: orders.filter(o => o.status === 'Pending').length,
     shipped: orders.filter(o => o.status === 'Shipped').length,
     delivered: orders.filter(o => o.status === 'Delivered').length,
-    totalRevenue: orders.filter(o => o.status !== 'Canceled').reduce((sum, o) => sum + o.amount, 0)
+    totalRevenue: orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Canceled').reduce((sum, o) => sum + (o.amount || 0), 0)
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading orders...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && orders.length === 0) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+          <button
+            onClick={fetchOrders}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen">
@@ -221,7 +252,7 @@ const Orders = ({ onViewOrder }) => {
           <div className="relative flex items-start justify-between">
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Revenue</p>
-              <h3 className="text-3xl font-light text-gray-900 dark:text-white mb-3 tracking-tight">${stats.totalRevenue.toLocaleString()}</h3>
+              <h3 className="text-3xl font-light text-gray-900 dark:text-white mb-3 tracking-tight">₹{stats.totalRevenue.toLocaleString('en-IN')}</h3>
             </div>
             <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg">
               <Package className="w-7 h-7 text-white" />
@@ -252,6 +283,7 @@ const Orders = ({ onViewOrder }) => {
             <option>Pending</option>
             <option>Processing</option>
             <option>Shipped</option>
+            <option>Out for Delivery</option>
             <option>Delivered</option>
             <option>Canceled</option>
           </select>
@@ -279,38 +311,60 @@ const Orders = ({ onViewOrder }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-amber-100/20 dark:divide-blue-900/20">
-              {filteredOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-amber-50/50 dark:hover:bg-gray-700/50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
-                    {order.id}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">{order.customer}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{order.email}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
-                    ${order.amount.toFixed(2)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    {order.paymentMethod}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusBadge(order.status)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    {order.date}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <button
-                      onClick={() => onViewOrder && onViewOrder(order.id)}
-                      className="p-2 text-amber-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-amber-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-                      title="View order details"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
+              {filteredOrders.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-6 py-12 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <Package className="w-12 h-12 text-gray-400 mb-4" />
+                      <p className="text-gray-600 dark:text-gray-400 text-lg">No orders found</p>
+                      <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">
+                        {error ? 'Failed to load orders. Please try again.' : 'There are no orders matching your search criteria.'}
+                      </p>
+                      {error && (
+                        <button
+                          onClick={fetchOrders}
+                          className="mt-4 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredOrders.map((order) => (
+                  <tr key={order.id} className="hover:bg-amber-50/50 dark:hover:bg-gray-700/50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
+                      {order.id}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white">{order.customer}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{order.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
+                      ₹{order.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                      {order.paymentMethod}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getStatusBadge(order.status)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                      {formatDate(order.date)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <button
+                        onClick={() => handleViewOrder(order)}
+                        className="p-2 text-amber-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-amber-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                        title="View order details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

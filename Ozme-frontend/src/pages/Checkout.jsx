@@ -28,7 +28,7 @@ import toast from 'react-hot-toast';
 
 export default function CheckoutPage() {
     const navigate = useNavigate();
-    const { cart, clearCart } = useCart();
+    const { cart, clearCart, removeFromCart } = useCart();
     const { user, isAuthenticated } = useAuth();
     const [step, setStep] = useState('shipping'); // 'shipping', 'payment', 'review'
     const [paymentMethod, setPaymentMethod] = useState('COD'); // 'COD' or 'ONLINE'
@@ -336,15 +336,115 @@ export default function CheckoutPage() {
         try {
             setIsProcessing(true);
 
-            // Clear previous order state and localStorage
-            resetOrderState();
+            // Check if user is authenticated
+            if (!isAuthenticated || !user) {
+                toast.error('Please login to place an order');
+                navigate('/login', { state: { from: '/checkout' } });
+                return;
+            }
+
+            // Check if cart is empty
+            if (cartItems.length === 0) {
+                toast.error('Your cart is empty');
+                navigate('/cart');
+                return;
+            }
+
+            // Filter and validate cart items - remove items with invalid IDs
+            const validCartItems = [];
+            const invalidCartItems = [];
             
-            // Generate fresh order ID for frontend display
-            const orderId = generateOrderId();
+            cartItems.forEach(item => {
+                // Check if item.id is a valid MongoDB ObjectId (24 hex characters)
+                const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(item.id?.toString());
+                
+                if (isValidObjectId) {
+                    validCartItems.push(item);
+                } else {
+                    invalidCartItems.push(item);
+                    console.warn(`Invalid product ID in cart: ${item.id} for product: ${item.name}`);
+                }
+            });
+            
+            // If there are invalid items, remove them from cart and show error
+            if (invalidCartItems.length > 0) {
+                // Remove invalid items from cart
+                invalidCartItems.forEach(item => {
+                    removeFromCart(item.id);
+                });
+                
+                const invalidNames = invalidCartItems.map(item => item.name).join(', ');
+                toast.error(
+                    `Some items in your cart have invalid IDs and have been removed: ${invalidNames}. Please add them again from the shop.`,
+                    { duration: 6000 }
+                );
+                
+                // If all items are invalid, redirect to cart
+                if (validCartItems.length === 0) {
+                    setIsProcessing(false);
+                    navigate('/cart');
+                    return;
+                }
+                
+                // If some items are valid, continue with valid items only
+                toast.info(`Proceeding with ${validCartItems.length} valid item(s) in your cart.`, { duration: 4000 });
+            }
+            
+            // Check if we have any valid items left
+            if (validCartItems.length === 0) {
+                toast.error('Your cart is empty. Please add products from the shop.');
+                navigate('/cart');
+                return;
+            }
+            
+            // Map valid cart items to backend format
+            const orderItems = validCartItems.map(item => ({
+                productId: item.id.toString(), // Ensure it's a string
+                quantity: item.quantity || 1,
+                size: item.size || '100ml',
+                price: item.price,
+            }));
+
+            // Prepare shipping address
+            const shippingAddress = {
+                firstName: formData.firstName,
+                lastName: formData.lastName,
+                name: `${formData.firstName} ${formData.lastName}`.trim(),
+                email: formData.email,
+                phone: formData.phone,
+                address: `${formData.address}${formData.apartment ? ', ' + formData.apartment : ''}`,
+                city: formData.city,
+                state: formData.state,
+                pincode: formData.pincode,
+                country: 'India',
+            };
+
+            // Call backend API to create order
+            const orderResponse = await apiRequest('/orders', {
+                method: 'POST',
+                body: JSON.stringify({
+                    items: orderItems,
+                    shippingAddress: shippingAddress,
+                    paymentMethod: 'COD',
+                    promoCode: null, // TODO: Add promo code support
+                    discountAmount: 0, // TODO: Add discount support
+                    totalAmount: total,
+                }),
+            });
+
+            if (!orderResponse || !orderResponse.success) {
+                throw new Error(orderResponse?.message || 'Failed to create order');
+            }
+
+            const backendOrder = orderResponse.data.order;
+            
+            // Create frontend order data for localStorage (as backup)
             const frontendOrderData = {
-                orderId: orderId,
-                orderDate: new Date().toISOString(),
-                status: 'Processing',
+                orderId: backendOrder._id || backendOrder.orderNumber,
+                backendOrderId: backendOrder._id,
+                orderNumber: backendOrder.orderNumber,
+                orderDate: backendOrder.createdAt || new Date().toISOString(),
+                status: backendOrder.orderStatus || 'Processing',
                 items: cartItems.map(item => ({
                     id: item.id,
                     name: item.name,
@@ -366,13 +466,13 @@ export default function CheckoutPage() {
                     pincode: formData.pincode,
                 },
                 paymentMethod: 'COD',
-                paymentStatus: 'Pending',
+                paymentStatus: backendOrder.paymentStatus || 'Pending',
                 subtotal: subtotal,
                 shippingCost: shippingCost,
-                totalAmount: total,
+                totalAmount: backendOrder.totalAmount || total,
             };
             
-            // Store new order data in localStorage (overwrites any previous order)
+            // Store order data in localStorage as backup
             localStorage.setItem('currentOrder', JSON.stringify(frontendOrderData));
             
             // Save order to order history
@@ -384,11 +484,22 @@ export default function CheckoutPage() {
             // Show success message
             toast.success('Your Cash on Delivery order has been placed successfully!');
             
-            // Redirect to track order page with a timestamp to force refresh
-            navigate('/track-order', { state: { orderId, timestamp: Date.now() } });
+            // Redirect to track order page with backend order ID
+            navigate('/track-order', { 
+                state: { 
+                    orderId: backendOrder._id || backendOrder.orderNumber,
+                    timestamp: Date.now() 
+                } 
+            });
         } catch (error) {
             console.error('COD order error:', error);
-            toast.error(error.message || 'Failed to place order. Please try again.');
+            const errorMessage = error.message || error.response?.data?.message || 'Failed to place order. Please try again.';
+            toast.error(errorMessage);
+            
+            // If it's an auth error, redirect to login
+            if (error.response?.status === 401 || errorMessage.includes('Authentication')) {
+                navigate('/login', { state: { from: '/checkout' } });
+            }
         } finally {
             setIsProcessing(false);
         }

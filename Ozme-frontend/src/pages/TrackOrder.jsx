@@ -1,56 +1,114 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, Link, useLocation, useParams } from 'react-router-dom';
 import { CheckCircle2, Circle, Package, MapPin, FileText, X, Download } from 'lucide-react';
+import { apiRequest } from '../utils/api';
 import jsPDF from 'jspdf';
 
 export default function TrackOrder() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { identifier } = useParams();
   const [orderData, setOrderData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Load order data from localStorage and refresh when location changes
+  // Load order data from backend API or localStorage
   useEffect(() => {
-    const loadOrderData = () => {
-      // First, try to get currentOrder from localStorage
+    const loadOrderData = async () => {
+      setLoading(true);
+      setError(null);
+
+      // Get order identifier from URL params, location state, or localStorage
+      const orderIdentifier = identifier || location.state?.orderId || location.state?.trackingNumber;
+
+      // First, try to fetch from backend if we have an identifier
+      if (orderIdentifier) {
+        try {
+          const response = await apiRequest(`/orders/track/${orderIdentifier}`);
+          
+          if (response && response.success && response.data.order) {
+            const backendOrder = response.data.order;
+            
+            // Transform backend order to frontend format
+            const transformedOrder = {
+              orderId: backendOrder._id,
+              backendOrderId: backendOrder._id,
+              orderNumber: backendOrder.orderNumber || `OZME-${backendOrder._id.toString().slice(-8).toUpperCase()}`,
+              orderDate: backendOrder.createdAt,
+              status: backendOrder.orderStatus,
+              trackingNumber: backendOrder.trackingNumber,
+              items: backendOrder.items?.map(item => ({
+                id: item.product?._id || item.product,
+                name: item.product?.name || 'Product',
+                image: item.product?.images?.[0] || item.product?.image || '',
+                price: item.price,
+                quantity: item.quantity,
+                size: item.size || '100ml',
+                category: item.product?.category || 'Perfume',
+              })) || [],
+              shippingAddress: {
+                firstName: backendOrder.shippingAddress?.name?.split(' ')[0] || '',
+                lastName: backendOrder.shippingAddress?.name?.split(' ').slice(1).join(' ') || '',
+                email: backendOrder.user?.email || '',
+                phone: backendOrder.shippingAddress?.phone || '',
+                address: backendOrder.shippingAddress?.address || '',
+                city: backendOrder.shippingAddress?.city || '',
+                state: backendOrder.shippingAddress?.state || '',
+                pincode: backendOrder.shippingAddress?.pincode || '',
+              },
+              paymentMethod: backendOrder.paymentMethod === 'Prepaid' ? 'ONLINE' : 'COD',
+              paymentStatus: backendOrder.paymentStatus,
+              subtotal: backendOrder.totalAmount + (backendOrder.discountAmount || 0),
+              shippingCost: 0,
+              totalAmount: backendOrder.totalAmount,
+              discountAmount: backendOrder.discountAmount || 0,
+            };
+
+            setOrderData(transformedOrder);
+            
+            // Save to localStorage as backup
+            localStorage.setItem('currentOrder', JSON.stringify(transformedOrder));
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.error('Error fetching order from backend:', err);
+          // Continue to localStorage fallback
+        }
+      }
+
+      // Fallback to localStorage
       const storedOrder = localStorage.getItem('currentOrder');
       if (storedOrder) {
         try {
           const parsedOrder = JSON.parse(storedOrder);
-          setOrderData(parsedOrder);
-          return;
+          
+          // If we have an identifier and it matches, use localStorage order
+          if (!orderIdentifier || parsedOrder.orderId === orderIdentifier || parsedOrder.backendOrderId === orderIdentifier) {
+            setOrderData(parsedOrder);
+            setLoading(false);
+            return;
+          }
         } catch (error) {
           console.error('Error parsing order data:', error);
         }
       }
 
-      // If no currentOrder, check if orderId is in location state or URL params
-      const orderIdFromState = location.state?.orderId;
-      if (orderIdFromState) {
-        // Try to find order in allOrders
-        try {
-          const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-          const foundOrder = allOrders.find(o => o.orderId === orderIdFromState);
-          if (foundOrder) {
-            setOrderData(foundOrder);
-            // Set as current order for consistency
-            localStorage.setItem('currentOrder', JSON.stringify(foundOrder));
-            return;
-          }
-        } catch (error) {
-          console.error('Error loading order from history:', error);
-        }
+      // If we have an identifier but no data found, show error
+      if (orderIdentifier) {
+        setError('Order not found. Please check your order ID or tracking number.');
+      } else {
+        setError('No order ID provided. Please go back to your orders or enter an order ID.');
       }
 
-      // If no order found, set to null
-      setOrderData(null);
+      setLoading(false);
     };
 
-    // Load order data on mount and when location changes
     loadOrderData();
 
-    // Also listen for storage events (in case order is updated from another tab/window)
+    // Listen for storage events (in case order is updated from another tab/window)
     const handleStorageChange = (e) => {
-      if (e.key === 'currentOrder' || e.key === 'allOrders') {
+      if (e.key === 'currentOrder') {
         loadOrderData();
       }
     };
@@ -60,7 +118,7 @@ export default function TrackOrder() {
     return () => {
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [location.pathname, location.state]);
+  }, [location.pathname, location.state, identifier]);
 
   // Calculate delivery date (3-5 days from order date)
   const getDeliveryDate = () => {

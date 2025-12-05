@@ -1,84 +1,178 @@
 import { ArrowLeft, Check, Clock, Package, Truck, MapPin, CreditCard, User, Mail, Phone } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { apiRequest } from '../utils/api';
 
-// Sample orders data
-const orders = [
-  {
-    id: 'ORD-001',
-    customer: 'John Doe',
-    email: 'john@example.com',
-    phone: '+1 234 567 8900',
-    amount: 299.99,
-    paymentMethod: 'Credit Card',
-    status: 'Delivered',
-    date: '2024-03-15',
-    items: [
-      { name: 'Wireless Headphones', qty: 1, price: 99.99 },
-      { name: 'Smart Watch', qty: 1, price: 199.99 }
-    ],
-    subtotal: 299.99,
-    shipping: 0,
-    discount: 0,
-    shippingAddress: '123 Main St, New York, NY 10001',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-15 10:30 AM', completed: true },
-      { status: 'Processing', date: '2024-03-15 11:00 AM', completed: true },
-      { status: 'Shipped', date: '2024-03-16 09:00 AM', completed: true },
-      { status: 'Delivered', date: '2024-03-18 02:30 PM', completed: true }
-    ]
+// Simple notification helper (temporary - replace with react-hot-toast after installing)
+const notify = {
+  success: (message) => {
+    console.log('✅ Success:', message);
+    // You can replace this with react-hot-toast after installation
   },
-  {
-    id: 'ORD-002',
-    customer: 'Jane Smith',
-    email: 'jane@example.com',
-    phone: '+1 234 567 8901',
-    amount: 149.99,
-    paymentMethod: 'PayPal',
-    status: 'Shipped',
-    date: '2024-03-18',
-    items: [
-      { name: 'Laptop Stand', qty: 2, price: 49.99 },
-      { name: 'USB-C Hub', qty: 1, price: 39.99 }
-    ],
-    subtotal: 139.98,
-    shipping: 10.00,
-    discount: 0,
-    shippingAddress: '456 Oak Ave, Los Angeles, CA 90001',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-18 02:15 PM', completed: true },
-      { status: 'Processing', date: '2024-03-18 03:00 PM', completed: true },
-      { status: 'Shipped', date: '2024-03-19 10:00 AM', completed: true },
-      { status: 'Delivered', date: null, completed: false }
-    ]
-  },
-  {
-    id: 'ORD-003',
-    customer: 'Mike Johnson',
-    email: 'mike@example.com',
-    phone: '+1 234 567 8902',
-    amount: 129.99,
-    paymentMethod: 'Credit Card',
-    status: 'Processing',
-    date: '2024-03-20',
-    items: [
-      { name: 'Mechanical Keyboard', qty: 1, price: 129.99 }
-    ],
-    subtotal: 129.99,
-    shipping: 0,
-    discount: 0,
-    shippingAddress: '789 Pine St, Chicago, IL 60601',
-    timeline: [
-      { status: 'Order Placed', date: '2024-03-20 11:45 AM', completed: true },
-      { status: 'Processing', date: '2024-03-20 12:00 PM', completed: true },
-      { status: 'Shipped', date: null, completed: false },
-      { status: 'Delivered', date: null, completed: false }
-    ]
+  error: (message) => {
+    console.error('❌ Error:', message);
+    alert(message); // Temporary fallback
   }
-];
+};
 
-const OrderDetails = ({ orderId, onBack }) => {
+const OrderDetails = ({ onBack }) => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [note, setNote] = useState('');
-  const order = orders.find(o => o.id === orderId) || orders[0];
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Fetch order from backend
+  useEffect(() => {
+    fetchOrder();
+  }, [id]);
+
+  const fetchOrder = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await apiRequest(`/admin/orders/${id}`);
+      
+      if (response && response.success) {
+        const backendOrder = response.data.order;
+        
+        // Transform backend order to frontend format
+        const transformedOrder = {
+          _id: backendOrder._id,
+          id: `OZME-${backendOrder._id.toString().slice(-8).toUpperCase()}`,
+          orderNumber: backendOrder.orderNumber || `OZME-${backendOrder._id.toString().slice(-8).toUpperCase()}`,
+          customer: backendOrder.user?.name || 'Guest',
+          email: backendOrder.user?.email || backendOrder.shippingAddress?.email || '',
+          phone: backendOrder.shippingAddress?.phone || '',
+          amount: backendOrder.totalAmount || 0,
+          paymentMethod: backendOrder.paymentMethod === 'Prepaid' ? 'Online' : 'COD',
+          status: backendOrder.orderStatus || 'Pending',
+          paymentStatus: backendOrder.paymentStatus || 'Pending',
+          date: backendOrder.createdAt || new Date().toISOString(),
+          items: backendOrder.items?.map(item => ({
+            name: item.product?.name || 'Product',
+            qty: item.quantity || 1,
+            price: item.price || 0,
+            size: item.size || '100ml',
+            image: item.product?.images?.[0] || ''
+          })) || [],
+          subtotal: backendOrder.totalAmount + (backendOrder.discountAmount || 0),
+          shipping: 0,
+          discount: backendOrder.discountAmount || 0,
+          shippingAddress: backendOrder.shippingAddress ? 
+            `${backendOrder.shippingAddress.address || ''}, ${backendOrder.shippingAddress.apartment || ''}, ${backendOrder.shippingAddress.city || ''}, ${backendOrder.shippingAddress.state || ''} ${backendOrder.shippingAddress.pincode || ''}`.trim().replace(/,\s*,/g, ',').replace(/^,\s*|,\s*$/g, '') :
+            '',
+          trackingNumber: backendOrder.trackingNumber || '',
+          timeline: generateTimeline(backendOrder),
+          promoCode: backendOrder.promoCode,
+          backendOrder: backendOrder,
+        };
+        
+        setOrder(transformedOrder);
+        setTrackingNumber(backendOrder.trackingNumber || '');
+      } else {
+        setError('Failed to fetch order');
+        notify.error(response?.message || 'Failed to load order');
+      }
+    } catch (err) {
+      console.error('Error fetching order:', err);
+      setError(err.message || 'Failed to load order');
+      notify.error(err.message || 'Failed to load order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generate timeline from order status
+  const generateTimeline = (backendOrder) => {
+    const timeline = [];
+    const statusOrder = ['Pending', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered'];
+    const currentStatus = backendOrder.orderStatus || 'Pending';
+    const currentIndex = statusOrder.indexOf(currentStatus);
+    
+    statusOrder.forEach((status, index) => {
+      const isCompleted = index <= currentIndex && currentStatus !== 'Cancelled';
+      timeline.push({
+        status: status,
+        date: isCompleted ? (backendOrder.updatedAt || backendOrder.createdAt) : null,
+        completed: isCompleted,
+      });
+    });
+    
+    if (currentStatus === 'Cancelled') {
+      timeline.push({
+        status: 'Cancelled',
+        date: backendOrder.updatedAt || backendOrder.createdAt,
+        completed: true,
+      });
+    }
+    
+    return timeline;
+  };
+
+  const handleUpdateStatus = async (newStatus, tracking = null) => {
+    if (!order) return;
+    
+    try {
+      setUpdatingStatus(true);
+      
+      const updateData = {
+        orderStatus: newStatus,
+      };
+      
+      if (tracking !== null) {
+        updateData.trackingNumber = tracking || trackingNumber || '';
+      }
+      
+      const response = await apiRequest(`/admin/orders/${order._id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData),
+      });
+      
+      if (response && response.success) {
+        notify.success('Order status updated successfully!');
+        fetchOrder(); // Refresh order data
+      } else {
+        notify.error(response?.message || 'Failed to update order status');
+      }
+    } catch (err) {
+      console.error('Error updating order status:', err);
+      notify.error(err.message || 'Failed to update order status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading order details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 dark:text-red-400 mb-4">{error || 'Order not found'}</p>
+          <button
+            onClick={() => navigate('/orders')}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+          >
+            Back to Orders
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const getStatusBadge = (status) => {
     const statusStyles = {
@@ -102,7 +196,7 @@ const OrderDetails = ({ orderId, onBack }) => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-center gap-4">
           <button 
-            onClick={onBack}
+            onClick={() => onBack ? onBack() : navigate('/orders')}
             className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-amber-100/20 dark:border-blue-900/20 rounded-xl hover:bg-amber-50 dark:hover:bg-gray-700 transition-all"
           >
             <ArrowLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
@@ -140,7 +234,7 @@ const OrderDetails = ({ orderId, onBack }) => {
                     <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Quantity: {item.qty}</p>
                   </div>
                   <p className="text-base font-bold text-gray-900 dark:text-white">
-                    ${(item.price * item.qty).toFixed(2)}
+                    ₹{(item.price * item.qty).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
               ))}
@@ -148,23 +242,23 @@ const OrderDetails = ({ orderId, onBack }) => {
               <div className="mt-6 pt-6 border-t border-blue-100/20 dark:border-blue-900/20 space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
-                  <span className="text-gray-800 dark:text-white font-semibold">${order.subtotal.toFixed(2)}</span>
+                  <span className="text-gray-800 dark:text-white font-semibold">₹{order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Shipping</span>
                   <span className="text-gray-800 dark:text-white font-semibold">
-                    {order.shipping === 0 ? 'Free' : `$${order.shipping.toFixed(2)}`}
+                    {order.shipping === 0 ? 'Free' : `₹${order.shipping.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   </span>
                 </div>
                 {order.discount > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Discount</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-${order.discount.toFixed(2)}</span>
+                    <span className="text-gray-600 dark:text-gray-400">Discount {order.promoCode && `(${order.promoCode})`}</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-₹{order.discount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-lg font-bold pt-3 border-t border-blue-100/20 dark:border-blue-900/20">
                   <span className="text-gray-800 dark:text-white">Total</span>
-                  <span className="text-amber-600 dark:text-blue-400">${order.amount.toFixed(2)}</span>
+                  <span className="text-amber-600 dark:text-blue-400">₹{order.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -202,7 +296,15 @@ const OrderDetails = ({ orderId, onBack }) => {
                       {event.status}
                     </p>
                     {event.date && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{event.date}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {new Date(event.date).toLocaleString('en-IN', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -306,8 +408,14 @@ const OrderDetails = ({ orderId, onBack }) => {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600 dark:text-gray-400">Status</span>
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
-                  Paid
+                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${
+                  order.paymentStatus === 'Paid' || order.paymentStatus === 'Success'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
+                    : order.paymentStatus === 'Pending'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800'
+                    : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800'
+                }`}>
+                  {order.paymentStatus || 'Pending'}
                 </span>
               </div>
             </div>
@@ -322,18 +430,66 @@ const OrderDetails = ({ orderId, onBack }) => {
             </div>
 
             <div className="p-6 space-y-3">
-              <button className="w-full py-3 px-4 bg-gradient-to-r from-purple-400 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-purple-500/25 transition-all font-semibold">
-                Mark as Processing
-              </button>
-              <button className="w-full py-3 px-4 bg-gradient-to-r from-amber-400 to-amber-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/25 transition-all font-semibold">
-                Mark as Shipped
-              </button>
-              <button className="w-full py-3 px-4 bg-gradient-to-r from-emerald-400 to-emerald-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/25 transition-all font-semibold">
-                Mark as Delivered
-              </button>
-              <button className="w-full py-3 px-4 bg-gradient-to-r from-rose-400 to-rose-600 text-white rounded-xl hover:shadow-lg hover:shadow-rose-500/25 transition-all font-semibold">
-                Cancel Order
-              </button>
+              {order.status !== 'Processing' && order.status !== 'Cancelled' && (
+                <button
+                  onClick={() => handleUpdateStatus('Processing')}
+                  disabled={updatingStatus}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-purple-400 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-purple-500/25 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updatingStatus ? 'Updating...' : 'Mark as Processing'}
+                </button>
+              )}
+              {order.status === 'Processing' && order.status !== 'Shipped' && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                <>
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Tracking Number
+                    </label>
+                    <input
+                      type="text"
+                      value={trackingNumber}
+                      onChange={(e) => setTrackingNumber(e.target.value)}
+                      placeholder="Enter tracking number"
+                      className="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleUpdateStatus('Shipped', trackingNumber)}
+                    disabled={updatingStatus || !trackingNumber.trim()}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-amber-400 to-amber-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/25 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {updatingStatus ? 'Updating...' : 'Mark as Shipped'}
+                  </button>
+                </>
+              )}
+              {order.status === 'Shipped' && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                <button
+                  onClick={() => handleUpdateStatus('Delivered')}
+                  disabled={updatingStatus}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-emerald-400 to-emerald-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/25 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updatingStatus ? 'Updating...' : 'Mark as Delivered'}
+                </button>
+              )}
+              {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to cancel this order?')) {
+                      handleUpdateStatus('Cancelled');
+                    }
+                  }}
+                  disabled={updatingStatus}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-rose-400 to-rose-600 text-white rounded-xl hover:shadow-lg hover:shadow-rose-500/25 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updatingStatus ? 'Cancelling...' : 'Cancel Order'}
+                </button>
+              )}
+              {order.trackingNumber && (
+                <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Tracking Number</p>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-white">{order.trackingNumber}</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

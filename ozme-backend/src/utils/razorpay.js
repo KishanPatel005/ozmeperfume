@@ -1,11 +1,33 @@
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
-// Initialize Razorpay instance
-const razorpayInstance = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Lazy initialization - only create instance when needed
+let razorpayInstance = null;
+
+/**
+ * Get or create Razorpay instance (lazy initialization)
+ * @returns {Object} Razorpay instance
+ * @throws {Error} If Razorpay credentials are not configured
+ */
+const getRazorpayInstance = () => {
+    if (!razorpayInstance) {
+        const keyId = process.env.RAZORPAY_KEY_ID;
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+        if (!keyId || !keySecret) {
+            throw new Error(
+                'Razorpay credentials not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in your .env file.'
+            );
+        }
+
+        razorpayInstance = new Razorpay({
+            key_id: keyId,
+            key_secret: keySecret,
+        });
+    }
+
+    return razorpayInstance;
+};
 
 /**
  * Create Razorpay order
@@ -15,6 +37,7 @@ const razorpayInstance = new Razorpay({
  */
 export const createRazorpayOrder = async (amount, orderId) => {
     try {
+        const instance = getRazorpayInstance();
         const options = {
             amount: Math.round(amount * 100), // Convert to paise
             currency: 'INR',
@@ -22,11 +45,14 @@ export const createRazorpayOrder = async (amount, orderId) => {
             payment_capture: 1, // Auto capture payment
         };
 
-        const order = await razorpayInstance.orders.create(options);
+        const order = await instance.orders.create(options);
         return order;
     } catch (error) {
         console.error('Razorpay create order error:', error);
-        throw new Error('Failed to create Razorpay order');
+        if (error.message.includes('not configured')) {
+            throw error;
+        }
+        throw new Error('Failed to create Razorpay order: ' + error.message);
     }
 };
 
@@ -43,9 +69,16 @@ export const verifyPaymentSignature = (
     razorpaySignature
 ) => {
     try {
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+        
+        if (!keySecret) {
+            console.error('Razorpay key secret not configured');
+            return false;
+        }
+
         const body = razorpayOrderId + '|' + razorpayPaymentId;
         const expectedSignature = crypto
-            .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+            .createHmac('sha256', keySecret)
             .update(body.toString())
             .digest('hex');
 
@@ -63,11 +96,15 @@ export const verifyPaymentSignature = (
  */
 export const fetchPaymentDetails = async (paymentId) => {
     try {
-        const payment = await razorpayInstance.payments.fetch(paymentId);
+        const instance = getRazorpayInstance();
+        const payment = await instance.payments.fetch(paymentId);
         return payment;
     } catch (error) {
         console.error('Razorpay fetch payment error:', error);
-        throw new Error('Failed to fetch payment details');
+        if (error.message.includes('not configured')) {
+            throw error;
+        }
+        throw new Error('Failed to fetch payment details: ' + error.message);
     }
 };
 
@@ -79,13 +116,20 @@ export const fetchPaymentDetails = async (paymentId) => {
  */
 export const createRefund = async (paymentId, amount = null) => {
     try {
+        const instance = getRazorpayInstance();
         const options = amount ? { amount: Math.round(amount * 100) } : {};
-        const refund = await razorpayInstance.payments.refund(paymentId, options);
+        const refund = await instance.payments.refund(paymentId, options);
         return refund;
     } catch (error) {
         console.error('Razorpay refund error:', error);
-        throw new Error('Failed to create refund');
+        if (error.message.includes('not configured')) {
+            throw error;
+        }
+        throw new Error('Failed to create refund: ' + error.message);
     }
 };
 
-export default razorpayInstance;
+// Export lazy getter for backward compatibility
+export default {
+    getInstance: getRazorpayInstance,
+};
