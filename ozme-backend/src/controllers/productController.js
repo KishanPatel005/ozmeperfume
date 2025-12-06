@@ -46,12 +46,21 @@ export const getProducts = async (req, res) => {
       .skip(skip)
       .limit(Number(limit));
 
+    // Calculate inStock from sizes array if present
+    const productsWithCalculatedStock = products.map(product => {
+      if (product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+        // Product is in stock if any size is in stock
+        product.inStock = product.sizes.some(size => size.inStock !== false && (size.stockQuantity || 0) > 0);
+      }
+      return product;
+    });
+
     const total = await Product.countDocuments(query);
 
     res.json({
       success: true,
       data: {
-        products,
+        products: productsWithCalculatedStock,
         pagination: {
           page: Number(page),
           limit: Number(limit),
@@ -81,6 +90,12 @@ export const getProduct = async (req, res) => {
         success: false,
         message: 'Product not found',
       });
+    }
+
+    // Calculate inStock from sizes array if present
+    if (product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+      // Product is in stock if any size is in stock
+      product.inStock = product.sizes.some(size => size.inStock !== false && (size.stockQuantity || 0) > 0);
     }
 
     // Only show active products to customers (admin can view all via admin route)

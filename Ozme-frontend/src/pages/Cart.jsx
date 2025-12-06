@@ -212,12 +212,17 @@ export default function CartPage() {
                                                     </span>
                                                     <h3 className="text-base sm:text-lg md:text-xl font-light text-gray-900 group-hover:text-amber-600 transition-colors duration-300 break-words">
                                                         {item.name}
+                                                        {item.size && (
+                                                            <span className="ml-2 text-sm font-normal text-gray-500">
+                                                                ({item.size})
+                                                            </span>
+                                                        )}
                                                     </h3>
                                                 </div>
 
                                                 {/* Remove Button */}
                                                 <button
-                                                    onClick={() => removeFromCart(item.id)}
+                                                    onClick={() => removeFromCart(item.id, item.size)}
                                                     className="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all duration-300 flex-shrink-0"
                                                     title="Remove item"
                                                 >
@@ -245,7 +250,7 @@ export default function CartPage() {
                                                 {/* Quantity Controls */}
                                                 <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden w-fit">
                                                     <button
-                                                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                                        onClick={() => updateQuantity(item.id, item.quantity - 1, item.size)}
                                                         className="p-2 sm:p-3 hover:bg-gray-50 transition-colors duration-200"
                                                         disabled={item.quantity <= 1}
                                                     >
@@ -255,7 +260,7 @@ export default function CartPage() {
                                                         {item.quantity}
                                                     </span>
                                                     <button
-                                                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                                        onClick={() => updateQuantity(item.id, item.quantity + 1, item.size)}
                                                         className="p-2 sm:p-3 hover:bg-gray-50 transition-colors duration-200"
                                                     >
                                                         <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-600" />

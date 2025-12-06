@@ -63,6 +63,36 @@ const productSchema = new mongoose.Schema(
       default: '100ML',
       enum: ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'],
     },
+    sizes: {
+      type: [
+        {
+          size: {
+            type: String,
+            enum: ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'],
+            required: true,
+          },
+          price: {
+            type: Number,
+            required: true,
+            min: 0,
+          },
+          originalPrice: {
+            type: Number,
+            min: 0,
+          },
+          stockQuantity: {
+            type: Number,
+            default: 0,
+            min: 0,
+          },
+          inStock: {
+            type: Boolean,
+            default: true,
+          },
+        },
+      ],
+      default: undefined,
+    },
     rating: {
       type: Number,
       default: 0,
@@ -109,6 +139,22 @@ const productSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Validation: If sizes array is provided, it must have at least one item
+productSchema.pre('validate', function (next) {
+  if (this.sizes && Array.isArray(this.sizes)) {
+    if (this.sizes.length === 0) {
+      return next(new Error('Sizes array must contain at least one size'));
+    }
+    // Validate MRP >= Price for each size
+    for (const sizeObj of this.sizes) {
+      if (sizeObj.originalPrice && sizeObj.price && sizeObj.originalPrice < sizeObj.price) {
+        return next(new Error(`MRP must be greater than or equal to selling price for size ${sizeObj.size}`));
+      }
+    }
+  }
+  next();
+});
 
 // Index for search and filtering
 productSchema.index({ name: 'text', description: 'text' });

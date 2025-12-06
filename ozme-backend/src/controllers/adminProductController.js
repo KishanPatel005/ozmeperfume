@@ -97,19 +97,72 @@ export const createAdminProduct = async (req, res) => {
     }
 
     // Validate required fields
-    if (!productData.name || !productData.description || !productData.category || !productData.gender || !productData.price) {
+    if (!productData.name || !productData.description || !productData.category || !productData.gender) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: name, description, category, gender, price',
+        message: 'Missing required fields: name, description, category, gender',
       });
     }
 
-    // Validate MRP >= Price
-    if (productData.originalPrice && productData.price && parseFloat(productData.originalPrice) < parseFloat(productData.price)) {
-      return res.status(400).json({
-        success: false,
-        message: 'MRP (originalPrice) must be greater than or equal to selling price',
-      });
+    // Validate sizes array if provided
+    if (productData.sizes && Array.isArray(productData.sizes)) {
+      if (productData.sizes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Sizes array must contain at least one size',
+        });
+      }
+
+      // Validate each size object
+      const usedSizes = new Set();
+      for (const sizeObj of productData.sizes) {
+        if (!sizeObj.size || !sizeObj.price) {
+          return res.status(400).json({
+            success: false,
+            message: 'Each size must have size and price',
+          });
+        }
+        
+        // Check for duplicate sizes
+        if (usedSizes.has(sizeObj.size)) {
+          return res.status(400).json({
+            success: false,
+            message: `Duplicate size found: ${sizeObj.size}. Each size can only be added once.`,
+          });
+        }
+        usedSizes.add(sizeObj.size);
+
+        // Validate MRP >= Price for each size
+        if (sizeObj.originalPrice && sizeObj.price && parseFloat(sizeObj.originalPrice) < parseFloat(sizeObj.price)) {
+          return res.status(400).json({
+            success: false,
+            message: `MRP must be greater than or equal to selling price for size ${sizeObj.size}`,
+          });
+        }
+
+        // Validate stockQuantity
+        if (sizeObj.stockQuantity === undefined || sizeObj.stockQuantity === null) {
+          sizeObj.stockQuantity = 0;
+        }
+        sizeObj.stockQuantity = parseInt(sizeObj.stockQuantity) || 0;
+        sizeObj.inStock = sizeObj.stockQuantity > 0;
+      }
+    } else {
+      // Backward compatibility: validate single price field
+      if (!productData.price) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required field: price (or sizes array)',
+        });
+      }
+
+      // Validate MRP >= Price
+      if (productData.originalPrice && productData.price && parseFloat(productData.originalPrice) < parseFloat(productData.price)) {
+        return res.status(400).json({
+          success: false,
+          message: 'MRP (originalPrice) must be greater than or equal to selling price',
+        });
+      }
     }
 
     // Validate category exists (optional check)
@@ -146,14 +199,35 @@ export const createAdminProduct = async (req, res) => {
       category: productData.category,
       gender: productData.gender,
       tag: productData.tag,
-      size: productData.size || '100ML',
-      price: parseFloat(productData.price),
-      originalPrice: productData.originalPrice ? parseFloat(productData.originalPrice) : undefined,
-      stockQuantity: parseInt(productData.stockQuantity) || 0,
-      inStock: parseInt(productData.stockQuantity) > 0,
       active: productData.active !== undefined ? productData.active : true,
       images: productData.existingImages || [], // Start with existing images if any
     };
+
+    // Handle sizes array or single size (backward compatibility)
+    if (productData.sizes && Array.isArray(productData.sizes) && productData.sizes.length > 0) {
+      // Use sizes array
+      productToCreate.sizes = productData.sizes.map(sizeObj => ({
+        size: sizeObj.size,
+        price: parseFloat(sizeObj.price),
+        originalPrice: sizeObj.originalPrice ? parseFloat(sizeObj.originalPrice) : undefined,
+        stockQuantity: parseInt(sizeObj.stockQuantity) || 0,
+        inStock: (parseInt(sizeObj.stockQuantity) || 0) > 0,
+      }));
+
+      // For backward compatibility, set single size/price fields from first size
+      productToCreate.size = productToCreate.sizes[0].size;
+      productToCreate.price = productToCreate.sizes[0].price;
+      productToCreate.originalPrice = productToCreate.sizes[0].originalPrice;
+      productToCreate.stockQuantity = productToCreate.sizes.reduce((sum, s) => sum + s.stockQuantity, 0);
+      productToCreate.inStock = productToCreate.sizes.some(s => s.inStock);
+    } else {
+      // Backward compatibility: single size
+      productToCreate.size = productData.size || '100ML';
+      productToCreate.price = parseFloat(productData.price);
+      productToCreate.originalPrice = productData.originalPrice ? parseFloat(productData.originalPrice) : undefined;
+      productToCreate.stockQuantity = parseInt(productData.stockQuantity) || 0;
+      productToCreate.inStock = parseInt(productData.stockQuantity) > 0;
+    }
 
     const product = await Product.create(productToCreate);
 
@@ -210,45 +284,172 @@ export const createAdminProduct = async (req, res) => {
  */
 export const updateAdminProduct = async (req, res) => {
   try {
-    // Validate MRP >= Price if both are provided
-    if (req.body.originalPrice !== undefined && req.body.price !== undefined) {
-      if (parseFloat(req.body.originalPrice) < parseFloat(req.body.price)) {
-        return res.status(400).json({
-          success: false,
-          message: 'MRP (originalPrice) must be greater than or equal to selling price',
-        });
-      }
-    } else if (req.body.originalPrice !== undefined) {
-      // If only originalPrice is provided, check against existing price
-      const existingProduct = await Product.findById(req.params.id);
-      if (existingProduct && parseFloat(req.body.originalPrice) < parseFloat(existingProduct.price)) {
-        return res.status(400).json({
-          success: false,
-          message: 'MRP (originalPrice) must be greater than or equal to selling price',
-        });
-      }
-    } else if (req.body.price !== undefined) {
-      // If only price is provided, check against existing originalPrice
-      const existingProduct = await Product.findById(req.params.id);
-      if (existingProduct?.originalPrice && parseFloat(existingProduct.originalPrice) < parseFloat(req.body.price)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Selling price cannot be greater than MRP (originalPrice)',
-        });
-      }
+    // Parse product data from FormData
+    let productData;
+    if (req.body.productData) {
+      productData = typeof req.body.productData === 'string' 
+        ? JSON.parse(req.body.productData) 
+        : req.body.productData;
+    } else {
+      productData = req.body;
     }
 
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-
-    if (!product) {
+    // Find existing product
+    const existingProduct = await Product.findById(req.params.id);
+    if (!existingProduct) {
       return res.status(404).json({
         success: false,
         message: 'Product not found',
       });
+    }
+
+    // Prepare update object
+    const updateData = {};
+
+    // Handle sizes array if provided
+    if (productData.sizes !== undefined && Array.isArray(productData.sizes)) {
+      if (productData.sizes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Sizes array must contain at least one size',
+        });
+      }
+
+      // Validate each size object
+      const usedSizes = new Set();
+      for (const sizeObj of productData.sizes) {
+        if (!sizeObj.size || !sizeObj.price) {
+          return res.status(400).json({
+            success: false,
+            message: 'Each size must have size and price',
+          });
+        }
+        
+        // Check for duplicate sizes
+        if (usedSizes.has(sizeObj.size)) {
+          return res.status(400).json({
+            success: false,
+            message: `Duplicate size found: ${sizeObj.size}. Each size can only be added once.`,
+          });
+        }
+        usedSizes.add(sizeObj.size);
+
+        // Validate MRP >= Price for each size
+        if (sizeObj.originalPrice && sizeObj.price && parseFloat(sizeObj.originalPrice) < parseFloat(sizeObj.price)) {
+          return res.status(400).json({
+            success: false,
+            message: `MRP must be greater than or equal to selling price for size ${sizeObj.size}`,
+          });
+        }
+
+        // Validate stockQuantity
+        if (sizeObj.stockQuantity === undefined || sizeObj.stockQuantity === null) {
+          sizeObj.stockQuantity = 0;
+        }
+        sizeObj.stockQuantity = parseInt(sizeObj.stockQuantity) || 0;
+        sizeObj.inStock = sizeObj.stockQuantity > 0;
+      }
+
+      // Set sizes array
+      updateData.sizes = productData.sizes.map(sizeObj => ({
+        size: sizeObj.size,
+        price: parseFloat(sizeObj.price),
+        originalPrice: sizeObj.originalPrice ? parseFloat(sizeObj.originalPrice) : undefined,
+        stockQuantity: parseInt(sizeObj.stockQuantity) || 0,
+        inStock: (parseInt(sizeObj.stockQuantity) || 0) > 0,
+      }));
+
+      // For backward compatibility, set single size/price fields from first size
+      updateData.size = updateData.sizes[0].size;
+      updateData.price = updateData.sizes[0].price;
+      updateData.originalPrice = updateData.sizes[0].originalPrice;
+      updateData.stockQuantity = updateData.sizes.reduce((sum, s) => sum + s.stockQuantity, 0);
+      updateData.inStock = updateData.sizes.some(s => s.inStock);
+    } else {
+      // Handle single size fields (backward compatibility)
+      if (productData.size !== undefined) updateData.size = productData.size;
+      if (productData.price !== undefined) {
+        updateData.price = parseFloat(productData.price);
+        // Validate MRP >= Price if both are provided
+        if (productData.originalPrice !== undefined) {
+          if (parseFloat(productData.originalPrice) < parseFloat(productData.price)) {
+            return res.status(400).json({
+              success: false,
+              message: 'MRP (originalPrice) must be greater than or equal to selling price',
+            });
+          }
+          updateData.originalPrice = parseFloat(productData.originalPrice);
+        } else if (existingProduct.originalPrice && parseFloat(productData.price) > existingProduct.originalPrice) {
+          return res.status(400).json({
+            success: false,
+            message: 'Selling price cannot be greater than MRP (originalPrice)',
+          });
+        }
+      }
+      if (productData.originalPrice !== undefined) {
+        const currentPrice = productData.price !== undefined ? parseFloat(productData.price) : existingProduct.price;
+        if (parseFloat(productData.originalPrice) < currentPrice) {
+          return res.status(400).json({
+            success: false,
+            message: 'MRP (originalPrice) must be greater than or equal to selling price',
+          });
+        }
+        updateData.originalPrice = parseFloat(productData.originalPrice);
+      }
+      if (productData.stockQuantity !== undefined) {
+        updateData.stockQuantity = parseInt(productData.stockQuantity) || 0;
+        updateData.inStock = updateData.stockQuantity > 0;
+      }
+    }
+
+    // Handle other fields
+    if (productData.name !== undefined) updateData.name = productData.name;
+    if (productData.shortDescription !== undefined) updateData.shortDescription = productData.shortDescription;
+    if (productData.description !== undefined) updateData.description = productData.description;
+    if (productData.category !== undefined) updateData.category = productData.category;
+    if (productData.gender !== undefined) updateData.gender = productData.gender;
+    if (productData.tag !== undefined) updateData.tag = productData.tag;
+    if (productData.active !== undefined) updateData.active = productData.active;
+
+    // Handle images if provided
+    if (productData.existingImages !== undefined) {
+      updateData.images = productData.existingImages;
+    }
+
+    // Update product
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    // Handle new image uploads if files are provided
+    if (req.files && req.files.length > 0) {
+      try {
+        // Create folder structure: products_images/{product_name}/
+        const folderName = sanitizeFolderName(product.name);
+        const cloudinaryFolder = `products_images/${folderName}`;
+
+        // Convert files to base64 for Cloudinary
+        const filePaths = req.files.map(file => {
+          const base64 = file.buffer.toString('base64');
+          return `data:${file.mimetype};base64,${base64}`;
+        });
+
+        // Upload images to Cloudinary
+        const uploadResults = await uploadMultipleImages(filePaths, cloudinaryFolder);
+        const uploadedImageUrls = uploadResults.map(result => result.url);
+
+        // Update product with new images (append to existing)
+        product.images = [...(product.images || []), ...uploadedImageUrls];
+        await product.save();
+      } catch (uploadError) {
+        console.error('Image upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: `Failed to upload images: ${uploadError.message}`,
+        });
+      }
     }
 
     res.json({
@@ -257,6 +458,7 @@ export const updateAdminProduct = async (req, res) => {
       data: { product },
     });
   } catch (error) {
+    console.error('Update product error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',

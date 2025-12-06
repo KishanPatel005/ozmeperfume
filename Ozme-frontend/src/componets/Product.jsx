@@ -37,6 +37,30 @@ function Product({ onBack }) {
         const backendProduct = response.data.product;
         
         // Transform backend product to frontend format
+        // Transform sizes: use sizes array if available, otherwise create from single size
+        let sizes = [];
+        if (backendProduct.sizes && Array.isArray(backendProduct.sizes) && backendProduct.sizes.length > 0) {
+          // Use sizes array from backend
+          sizes = backendProduct.sizes.map(s => ({
+            value: s.size,
+            label: s.size,
+            price: s.price,
+            originalPrice: s.originalPrice || s.price,
+            stockQuantity: s.stockQuantity || 0,
+            inStock: s.inStock !== undefined ? s.inStock : (s.stockQuantity > 0),
+          }));
+        } else {
+          // Backward compatibility: create single size from old fields
+          sizes = [{
+            value: backendProduct.size || '100ML',
+            label: backendProduct.size || '100ML',
+            price: backendProduct.price,
+            originalPrice: backendProduct.originalPrice || backendProduct.price,
+            stockQuantity: backendProduct.stockQuantity || 0,
+            inStock: backendProduct.inStock !== undefined ? backendProduct.inStock : (backendProduct.stockQuantity > 0),
+          }];
+        }
+
         const transformedProduct = {
           id: backendProduct._id,
           _id: backendProduct._id,
@@ -45,11 +69,13 @@ function Product({ onBack }) {
           shortDescription: backendProduct.shortDescription || '',
           category: backendProduct.category || 'Perfume',
           gender: backendProduct.gender || 'Unisex',
-          price: backendProduct.price,
-          originalPrice: backendProduct.originalPrice || backendProduct.price,
-          discount: backendProduct.originalPrice 
-            ? Math.round(((backendProduct.originalPrice - backendProduct.price) / backendProduct.originalPrice) * 100)
-            : 0,
+          price: sizes.length > 0 ? sizes[0].price : backendProduct.price, // Use first size price for display
+          originalPrice: sizes.length > 0 ? sizes[0].originalPrice : (backendProduct.originalPrice || backendProduct.price),
+          discount: sizes.length > 0 && sizes[0].originalPrice
+            ? Math.round(((sizes[0].originalPrice - sizes[0].price) / sizes[0].originalPrice) * 100)
+            : (backendProduct.originalPrice 
+                ? Math.round(((backendProduct.originalPrice - backendProduct.price) / backendProduct.originalPrice) * 100)
+                : 0),
           images: backendProduct.images && backendProduct.images.length > 0 
             ? backendProduct.images 
             : ['https://via.placeholder.com/400x600?text=No+Image'],
@@ -58,9 +84,10 @@ function Product({ onBack }) {
           reviews: backendProduct.reviewsCount || 0,
           tag: backendProduct.tag || null,
           bestseller: backendProduct.tag === 'Bestseller',
-          size: backendProduct.size || '100ML',
-          stockQuantity: backendProduct.stockQuantity || 0,
-          inStock: backendProduct.inStock !== undefined ? backendProduct.inStock : (backendProduct.stockQuantity > 0),
+          size: sizes.length > 0 ? sizes[0].value : (backendProduct.size || '100ML'),
+          sizes: sizes, // Add sizes array
+          stockQuantity: sizes.reduce((sum, s) => sum + s.stockQuantity, 0), // Total stock across all sizes
+          inStock: sizes.some(s => s.inStock), // Product is in stock if any size is in stock
           active: backendProduct.active !== undefined ? backendProduct.active : true,
           // Optional fields that might not exist
           highlights: backendProduct.highlights || [],
@@ -74,8 +101,11 @@ function Product({ onBack }) {
 
         setProduct(transformedProduct);
         
-        // Set default size to product's size if available
-        if (backendProduct.size) {
+        // Set default selected size (first available size or first size in stock)
+        if (sizes.length > 0) {
+          const firstInStock = sizes.find(s => s.inStock);
+          setSelectedSize(firstInStock ? firstInStock.value : sizes[0].value);
+        } else if (backendProduct.size) {
           setSelectedSize(backendProduct.size);
         }
       } else {
@@ -127,40 +157,29 @@ function Product({ onBack }) {
     );
   }
 
-  // Generate sizes based on product size options
-  // Backend has: 50ML, 100ML, 150ML, 200ML, 250ML, 300ML
-  const sizeOptions = ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'];
-  const baseSize = product.size || '100ML';
-  const baseIndex = sizeOptions.indexOf(baseSize);
-  
-  const sizes = sizeOptions.map((size, idx) => {
-    // Calculate price multiplier based on size (simplified - can be adjusted)
-    const sizeMultiplier = [0.6, 1.0, 1.5, 2.0, 2.5, 3.0][idx];
-    return {
-      value: size,
-      label: size,
-      price: Math.round(product.price * sizeMultiplier)
-    };
-  });
-
-  const currentPrice = sizes.find(s => s.value === selectedSize)?.price || product.price;
+  // Use sizes from product (already transformed from backend)
+  const sizes = product.sizes || [];
+  const selectedSizeObj = sizes.find(s => s.value === selectedSize);
+  const currentPrice = selectedSizeObj?.price || product.price;
+  const selectedSizeStock = selectedSizeObj?.stockQuantity || 0;
+  const selectedSizeInStock = selectedSizeObj?.inStock !== undefined ? selectedSizeObj.inStock : (selectedSizeStock > 0);
 
   const nextImage = () => setSelectedImage((prev) => (prev === product.images.length - 1 ? 0 : prev + 1));
   const prevImage = () => setSelectedImage((prev) => (prev === 0 ? product.images.length - 1 : prev - 1));
 
   const handleAddToCartClick = () => {
-    if (!product.inStock || product.stockQuantity === 0) {
-      toast.error('Product is out of stock');
+    if (!selectedSizeInStock || selectedSizeStock === 0) {
+      toast.error(`Size ${selectedSize} is out of stock`);
       return;
     }
     
-    if (quantity > product.stockQuantity) {
-      toast.error(`Only ${product.stockQuantity} items available in stock`);
+    if (quantity > selectedSizeStock) {
+      toast.error(`Only ${selectedSizeStock} items available in stock for ${selectedSize}`);
       return;
     }
     
-    addToCart(product, quantity, selectedSize);
-    toast.success(`${quantity} x ${product.name} added to cart!`);
+    // Pass the selected size price to addToCart
+    addToCart(product, quantity, selectedSize, currentPrice);
   };
 
   const handleWhatsAppOrder = () => {
@@ -252,11 +271,13 @@ function Product({ onBack }) {
             <div className="mb-6">
               <div className="flex items-center gap-3">
                 <span className="text-4xl font-normal text-gray-900">₹{currentPrice.toLocaleString('en-IN')}</span>
-                {product.originalPrice && product.originalPrice > product.price && (
+                {selectedSizeObj && selectedSizeObj.originalPrice && selectedSizeObj.originalPrice > selectedSizeObj.price && (
                   <>
-                    <span className="text-xl text-gray-400 line-through">₹{product.originalPrice.toLocaleString('en-IN')}</span>
-                    {product.discount > 0 && (
-                      <span className="px-2 py-1 bg-green-50 text-green-700 text-sm font-semibold">Save {product.discount}%</span>
+                    <span className="text-xl text-gray-400 line-through">₹{selectedSizeObj.originalPrice.toLocaleString('en-IN')}</span>
+                    {Math.round(((selectedSizeObj.originalPrice - selectedSizeObj.price) / selectedSizeObj.originalPrice) * 100) > 0 && (
+                      <span className="px-2 py-1 bg-green-50 text-green-700 text-sm font-semibold">
+                        Save {Math.round(((selectedSizeObj.originalPrice - selectedSizeObj.price) / selectedSizeObj.originalPrice) * 100)}%
+                      </span>
                     )}
                   </>
                 )}
@@ -277,7 +298,17 @@ function Product({ onBack }) {
                     className={`py-3 px-6 text-center border-2 transition-all duration-200 
                       ${selectedSize === size.value ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-800 hover:border-black'}`}>
                     <div className="font-semibold text-sm">{size.label}</div>
-                    <div className="text-xs mt-1 opacity-80">₹{size.price.toLocaleString('en-IN')}</div>
+                    <div className="text-xs mt-1 opacity-80">
+                  ₹{size.price.toLocaleString('en-IN')}
+                  {size.originalPrice && size.originalPrice > size.price && (
+                    <span className="block text-gray-400 line-through text-[10px]">
+                      ₹{size.originalPrice.toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
+                {!size.inStock && (
+                  <div className="text-[10px] text-red-500 mt-1 font-semibold">Out of Stock</div>
+                )}
                   </button>
                 ))}
               </div>
@@ -286,8 +317,8 @@ function Product({ onBack }) {
             {/* Quantity */}
             <div className="mb-8">
               <label className="block text-sm font-semibold text-gray-900 mb-3 tracking-wide uppercase">
-                QUANTITY {product.stockQuantity > 0 && (
-                  <span className="text-xs font-normal text-gray-500 normal-case">({product.stockQuantity} available)</span>
+                QUANTITY {selectedSizeStock > 0 && (
+                  <span className="text-xs font-normal text-gray-500 normal-case">({selectedSizeStock} available for {selectedSize})</span>
                 )}
               </label>
               <div className="flex items-center gap-4">
@@ -302,11 +333,11 @@ function Product({ onBack }) {
                   <span className="w-12 h-10 flex items-center justify-center font-medium text-black border-x border-gray-300">{quantity}</span>
                   <button 
                     onClick={() => setQuantity(q => {
-                      const maxQty = product.stockQuantity > 0 ? Math.min(product.stockQuantity, 10) : 10;
+                      const maxQty = selectedSizeStock > 0 ? Math.min(selectedSizeStock, 10) : 10;
                       return Math.min(q + 1, maxQty);
                     })} 
                     className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors"
-                    disabled={quantity >= (product.stockQuantity > 0 ? Math.min(product.stockQuantity, 10) : 10)}
+                    disabled={quantity >= (selectedSizeStock > 0 ? Math.min(selectedSizeStock, 10) : 10)}
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -316,13 +347,13 @@ function Product({ onBack }) {
             </div>
 
             {/* Stock Status */}
-            {!product.inStock || product.stockQuantity === 0 ? (
+            {!selectedSizeInStock || selectedSizeStock === 0 ? (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded">
-                <p className="text-red-700 font-semibold text-sm">Out of Stock</p>
+                <p className="text-red-700 font-semibold text-sm">Size {selectedSize} is Out of Stock</p>
               </div>
-            ) : product.stockQuantity < 10 ? (
+            ) : selectedSizeStock < 10 ? (
               <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded">
-                <p className="text-amber-700 font-semibold text-sm">Only {product.stockQuantity} left in stock!</p>
+                <p className="text-amber-700 font-semibold text-sm">Only {selectedSizeStock} left in stock for {selectedSize}!</p>
               </div>
             ) : null}
 
@@ -330,15 +361,15 @@ function Product({ onBack }) {
             <div className="flex gap-3 mb-6">
               <button 
                 onClick={handleAddToCartClick} 
-                disabled={!product.inStock || product.stockQuantity === 0}
+                disabled={!selectedSizeInStock || selectedSizeStock === 0}
                 className={`flex-1 py-3 font-semibold text-sm tracking-wider transition-all duration-300 flex items-center justify-center gap-2 shadow-md ${
-                  !product.inStock || product.stockQuantity === 0
+                  !selectedSizeInStock || selectedSizeStock === 0
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-black text-white hover:bg-gray-800'
                 }`}
               >
                 <ShoppingCart className="w-5 h-5" />
-                {!product.inStock || product.stockQuantity === 0 ? 'OUT OF STOCK' : 'ADD TO CART'}
+                {!selectedSizeInStock || selectedSizeStock === 0 ? 'OUT OF STOCK' : 'ADD TO CART'}
               </button>
               <button onClick={() => product && toggleWishlist(product)}
                 className={`w-12 h-12 flex items-center justify-center border transition-all duration-300 rounded 

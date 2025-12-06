@@ -1,4 +1,4 @@
-import { Plus, Edit, Trash2, Search, Package, TrendingUp, AlertCircle, Filter, ArrowLeft } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Package, TrendingUp, AlertCircle, Filter, ArrowLeft, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { apiRequest } from '../utils/api';
 
@@ -34,6 +34,7 @@ const Products = () => {
           originalPrice: product.originalPrice || product.price,
           discount: product.originalPrice ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100) : 0,
           stock: product.stockQuantity || 0,
+          sizes: product.sizes || [], // Include sizes array
           status: !product.active ? 'Out of Stock' : (product.stockQuantity < 20 ? 'Low Stock' : 'Active'),
           image: product.images?.[0] || '',
           images: product.images || [],
@@ -279,15 +280,29 @@ const Products = () => {
                     {product.gender || 'Unisex'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
-                    ₹{product.price?.toLocaleString('en-IN') || '0'}
+                    {product.sizes && product.sizes.length > 1 ? (
+                      <div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Multiple sizes</div>
+                        <div>From ₹{Math.min(...product.sizes.map(s => s.price)).toLocaleString('en-IN')}</div>
+                      </div>
+                    ) : (
+                      `₹${product.price?.toLocaleString('en-IN') || '0'}`
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                     {product.discount > 0 ? `${product.discount}%` : '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    <span className={(product.stock || 0) < 20 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
-                      {product.stock || 0}
-                    </span>
+                    {product.sizes && product.sizes.length > 1 ? (
+                      <div className="text-xs">
+                        <div className="font-semibold">{product.sizes.length} sizes</div>
+                        <div className="text-gray-500">Total: {product.sizes.reduce((sum, s) => sum + (s.stockQuantity || 0), 0)}</div>
+                      </div>
+                    ) : (
+                      <span className={(product.stock || 0) < 20 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
+                        {product.stock || 0}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getStatusBadge(product.status)}
@@ -328,32 +343,51 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
   const [imageInputs, setImageInputs] = useState([0]); // Track file input fields (up to 10)
   const [selectedFiles, setSelectedFiles] = useState([]); // Store File objects
   const [filePreviews, setFilePreviews] = useState([]); // Store preview URLs
-  const [formData, setFormData] = useState(editingProduct ? {
-    name: editingProduct.name || '',
-    shortDescription: editingProduct.shortDescription || '',
-    description: editingProduct.description || '',
-    category: editingProduct.category || '',
-    gender: editingProduct.gender || 'Unisex',
-    tag: editingProduct.tag || '',
-    size: editingProduct.size || '100ML',
-    mrp: editingProduct.originalPrice || editingProduct.price || '',
-    price: editingProduct.price || '',
-    stockQuantity: editingProduct.stockQuantity || editingProduct.stock || '',
-    images: editingProduct.images || (editingProduct.image ? [editingProduct.image] : []), // For editing, keep existing images
-    active: editingProduct.active !== undefined ? editingProduct.active : true,
-  } : {
-    name: '',
-    shortDescription: '',
-    description: '',
-    category: '',
-    gender: 'Unisex',
-    tag: '',
-    size: '100ML',
-    mrp: '',
-    price: '',
-    stockQuantity: '',
-    images: [],
-    active: true,
+  const [formData, setFormData] = useState(() => {
+    if (editingProduct) {
+      // If product has sizes array, use it; otherwise convert single size to array format
+      let sizes = [];
+      if (editingProduct.sizes && Array.isArray(editingProduct.sizes) && editingProduct.sizes.length > 0) {
+        sizes = editingProduct.sizes.map(s => ({
+          size: s.size || '100ML',
+          price: s.price || '',
+          originalPrice: s.originalPrice || '',
+          stockQuantity: s.stockQuantity || 0,
+        }));
+      } else {
+        // Convert single size to array format for backward compatibility
+        sizes = [{
+          size: editingProduct.size || '100ML',
+          price: editingProduct.price || '',
+          originalPrice: editingProduct.originalPrice || '',
+          stockQuantity: editingProduct.stockQuantity || 0,
+        }];
+      }
+      
+      return {
+        name: editingProduct.name || '',
+        shortDescription: editingProduct.shortDescription || '',
+        description: editingProduct.description || '',
+        category: editingProduct.category || '',
+        gender: editingProduct.gender || 'Unisex',
+        tag: editingProduct.tag || '',
+        sizes: sizes,
+        images: editingProduct.images || (editingProduct.image ? [editingProduct.image] : []),
+        active: editingProduct.active !== undefined ? editingProduct.active : true,
+      };
+    } else {
+      return {
+        name: '',
+        shortDescription: '',
+        description: '',
+        category: '',
+        gender: 'Unisex',
+        tag: '',
+        sizes: [{ size: '100ML', price: '', originalPrice: '', stockQuantity: 0 }],
+        images: [],
+        active: true,
+      };
+    }
   });
 
   // Fetch categories on mount
@@ -436,14 +470,34 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
 
   const handleSave = async () => {
     // Validation
-    if (!formData.name || !formData.description || !formData.category || !formData.gender || !formData.price || formData.stockQuantity === '') {
-      alert('Please fill in all required fields (Name, Description, Category, Gender, Price, Stock Quantity)');
+    if (!formData.name || !formData.description || !formData.category || !formData.gender) {
+      alert('Please fill in all required fields (Name, Description, Category, Gender)');
       return;
     }
 
-    if (formData.mrp && parseFloat(formData.mrp) < parseFloat(formData.price)) {
-      alert('MRP must be greater than or equal to Selling Price');
+    // Validate sizes array
+    if (!formData.sizes || formData.sizes.length === 0) {
+      alert('Please add at least one product size');
       return;
+    }
+
+    // Validate each size
+    for (let i = 0; i < formData.sizes.length; i++) {
+      const sizeItem = formData.sizes[i];
+      if (!sizeItem.size || !sizeItem.price || sizeItem.stockQuantity === '' || sizeItem.stockQuantity === undefined) {
+        alert(`Please fill in all fields for Size #${i + 1} (Size, Price, Stock Quantity)`);
+        return;
+      }
+      
+      if (!sizeItem.originalPrice) {
+        alert(`Please enter MRP for Size #${i + 1}`);
+        return;
+      }
+
+      if (parseFloat(sizeItem.originalPrice) < parseFloat(sizeItem.price)) {
+        alert(`MRP must be greater than or equal to Selling Price for Size #${i + 1} (${sizeItem.size})`);
+        return;
+      }
     }
 
     // Check for images (either selected files or existing images for editing)
@@ -478,11 +532,12 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
         category: formData.category,
         gender: formData.gender,
         tag: formData.tag || undefined,
-        size: formData.size,
-        price: parseFloat(formData.price),
-        originalPrice: formData.mrp ? parseFloat(formData.mrp) : undefined,
-        stockQuantity: parseInt(formData.stockQuantity),
-        inStock: parseInt(formData.stockQuantity) > 0,
+        sizes: formData.sizes.map(sizeItem => ({
+          size: sizeItem.size,
+          price: parseFloat(sizeItem.price),
+          originalPrice: parseFloat(sizeItem.originalPrice),
+          stockQuantity: parseInt(sizeItem.stockQuantity) || 0,
+        })),
         active: formData.active,
       };
 
@@ -525,11 +580,6 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
       setUploadingImages(false);
     }
   };
-
-  // Calculate discount percentage
-  const discountPercent = formData.mrp && formData.price
-    ? Math.round(((parseFloat(formData.mrp) - parseFloat(formData.price)) / parseFloat(formData.mrp)) * 100)
-    : 0;
 
   return (
     <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen">
@@ -597,38 +647,144 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
                 </select>
               </div>
 
-              {/* MRP and Price */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    MRP (₹) *
+              {/* Sizes Section */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    Product Sizes * (Add at least one size)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.mrp}
-                    onChange={(e) => handleChange('mrp', e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Find the first available size that's not already used
+                      const allSizes = ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'];
+                      const usedSizes = formData.sizes.map(s => s.size);
+                      const availableSize = allSizes.find(size => !usedSizes.includes(size)) || allSizes[0];
+                      
+                      const newSizes = [...formData.sizes, { 
+                        size: availableSize, 
+                        price: '', 
+                        originalPrice: '', 
+                        stockQuantity: 0 
+                      }];
+                      setFormData({ ...formData, sizes: newSizes });
+                    }}
+                    disabled={formData.sizes.length >= 6}
+                    className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    + Add Size
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Selling Price (₹) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.price}
-                    onChange={(e) => handleChange('price', e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
-                  />
-                  {discountPercent > 0 && (
-                    <p className="mt-1 text-sm text-emerald-600 dark:text-emerald-400">
-                      {discountPercent}% discount
-                    </p>
-                  )}
+                <div className="space-y-4">
+                  {formData.sizes.map((sizeItem, index) => {
+                    const discountPercent = sizeItem.originalPrice && sizeItem.price
+                      ? Math.round(((parseFloat(sizeItem.originalPrice) - parseFloat(sizeItem.price)) / parseFloat(sizeItem.originalPrice)) * 100)
+                      : 0;
+                    
+                    // Get available sizes (exclude already used sizes except current one)
+                    const usedSizes = formData.sizes.map((s, i) => i !== index ? s.size : null).filter(Boolean);
+                    const availableSizes = ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'].filter(
+                      size => !usedSizes.includes(size) || size === sizeItem.size
+                    );
+
+                    return (
+                      <div key={index} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900/50">
+                        <div className="flex items-start justify-between mb-3">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Size #{index + 1}
+                          </span>
+                          {formData.sizes.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newSizes = formData.sizes.filter((_, i) => i !== index);
+                                setFormData({ ...formData, sizes: newSizes });
+                              }}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                              Size *
+                            </label>
+                            <select
+                              value={sizeItem.size}
+                              onChange={(e) => {
+                                const newSizes = [...formData.sizes];
+                                newSizes[index].size = e.target.value;
+                                setFormData({ ...formData, sizes: newSizes });
+                              }}
+                              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white text-sm"
+                            >
+                              {availableSizes.map(size => (
+                                <option key={size} value={size}>{size}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                              MRP (₹) *
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={sizeItem.originalPrice}
+                              onChange={(e) => {
+                                const newSizes = [...formData.sizes];
+                                newSizes[index].originalPrice = e.target.value;
+                                setFormData({ ...formData, sizes: newSizes });
+                              }}
+                              placeholder="0.00"
+                              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                              Selling Price (₹) *
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={sizeItem.price}
+                              onChange={(e) => {
+                                const newSizes = [...formData.sizes];
+                                newSizes[index].price = e.target.value;
+                                setFormData({ ...formData, sizes: newSizes });
+                              }}
+                              placeholder="0.00"
+                              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white text-sm"
+                            />
+                            {discountPercent > 0 && (
+                              <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                                {discountPercent}% off
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                              Stock Quantity *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={sizeItem.stockQuantity}
+                              onChange={(e) => {
+                                const newSizes = [...formData.sizes];
+                                newSizes[index].stockQuantity = parseInt(e.target.value) || 0;
+                                setFormData({ ...formData, sizes: newSizes });
+                              }}
+                              placeholder="0"
+                              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -671,24 +827,6 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
                 </div>
               </div>
 
-              {/* Size Dropdown */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                  Size *
-                </label>
-                <select
-                  value={formData.size}
-                  onChange={(e) => handleChange('size', e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-white"
-                >
-                  <option value="50ML">50ML</option>
-                  <option value="100ML">100ML</option>
-                  <option value="150ML">150ML</option>
-                  <option value="200ML">200ML</option>
-                  <option value="250ML">250ML</option>
-                  <option value="300ML">300ML</option>
-                </select>
-              </div>
 
               {/* Short Description */}
               <div>
