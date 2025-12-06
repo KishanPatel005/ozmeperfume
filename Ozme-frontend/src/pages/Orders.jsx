@@ -1,21 +1,81 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Package, ArrowLeft, Eye, Calendar, CheckCircle2, Clock, Truck, XCircle, CreditCard, Wallet, Download } from 'lucide-react';
+import { apiRequest } from '../utils/api';
 import jsPDF from 'jspdf';
 
 export default function Orders() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Load all orders from localStorage
-    const loadOrders = () => {
+    const loadOrders = async () => {
+      setLoading(true);
+      setError(null);
+      
       try {
-        const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-        setOrders(allOrders);
-      } catch (error) {
-        console.error('Error loading orders:', error);
-        setOrders([]);
+        // Try to fetch from backend first
+        const response = await apiRequest('/orders/user');
+        
+        if (response && response.success && response.data.orders) {
+          // Transform backend orders to frontend format
+          const transformedOrders = response.data.orders.map(order => ({
+            orderId: order._id,
+            backendOrderId: order._id,
+            orderNumber: order.orderNumber || `OZME-${order._id.toString().slice(-8).toUpperCase()}`,
+            orderDate: order.createdAt,
+            status: order.orderStatus || 'Pending',
+            trackingNumber: order.trackingNumber,
+            items: order.items?.map(item => ({
+              id: item.product?._id || item.product,
+              name: item.product?.name || 'Product',
+              image: item.product?.images?.[0] || item.product?.image || '',
+              price: item.price,
+              quantity: item.quantity,
+              size: item.size || '100ml',
+              category: item.product?.category || 'Perfume',
+            })) || [],
+            shippingAddress: order.shippingAddress ? {
+              firstName: order.shippingAddress.name?.split(' ')[0] || '',
+              lastName: order.shippingAddress.name?.split(' ').slice(1).join(' ') || '',
+              email: order.user?.email || '',
+              phone: order.shippingAddress.phone || '',
+              address: order.shippingAddress.address || '',
+              city: order.shippingAddress.city || '',
+              state: order.shippingAddress.state || '',
+              pincode: order.shippingAddress.pincode || '',
+            } : {},
+            paymentMethod: order.paymentMethod === 'Prepaid' ? 'ONLINE' : 'COD',
+            paymentStatus: order.paymentStatus,
+            subtotal: order.totalAmount + (order.discountAmount || 0),
+            shippingCost: 0,
+            totalAmount: order.totalAmount,
+            discountAmount: order.discountAmount || 0,
+          }));
+          
+          setOrders(transformedOrders);
+          
+          // Also save to localStorage as backup
+          localStorage.setItem('allOrders', JSON.stringify(transformedOrders));
+        } else {
+          // Backend unavailable, try localStorage
+          const localOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+          setOrders(localOrders);
+        }
+      } catch (err) {
+        console.error('Error fetching orders:', err);
+        // Fallback to localStorage
+        try {
+          const localOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+          setOrders(localOrders);
+        } catch (localError) {
+          console.error('Error loading orders from localStorage:', localError);
+          setError('Failed to load orders');
+        }
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -67,14 +127,21 @@ export default function Orders() {
 
   // Handle view order
   const handleViewOrder = (orderId) => {
-    // Find the order in allOrders
-    const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-    const order = allOrders.find(o => o.orderId === orderId);
+    // Find the order in current orders state
+    const order = orders.find(o => o.orderId === orderId || o.backendOrderId === orderId);
     
     if (order) {
       // Set as current order and navigate
       localStorage.setItem('currentOrder', JSON.stringify(order));
-      navigate('/track-order', { state: { orderId, timestamp: Date.now() } });
+      navigate('/track-order', { state: { orderId: order.backendOrderId || order.orderId, timestamp: Date.now() } });
+    } else {
+      // Fallback: try localStorage
+      const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+      const localOrder = allOrders.find(o => o.orderId === orderId || o.backendOrderId === orderId);
+      if (localOrder) {
+        localStorage.setItem('currentOrder', JSON.stringify(localOrder));
+        navigate('/track-order', { state: { orderId: localOrder.backendOrderId || localOrder.orderId, timestamp: Date.now() } });
+      }
     }
   };
 
@@ -322,7 +389,33 @@ export default function Orders() {
         </div>
 
         {/* Orders List */}
-        {orders.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-16 sm:py-24">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Package className="w-12 h-12 text-gray-400 animate-pulse" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Loading Orders...</h2>
+            <p className="text-gray-600 mb-8 max-w-md mx-auto">
+              Please wait while we fetch your orders from the server.
+            </p>
+          </div>
+        ) : error ? (
+          <div className="text-center py-16 sm:py-24">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <XCircle className="w-12 h-12 text-red-400" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Error Loading Orders</h2>
+            <p className="text-gray-600 mb-8 max-w-md mx-auto">
+              {error}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-8 py-3 bg-black text-white font-semibold hover:bg-gray-900 transition-all duration-300 shadow-lg hover:shadow-2xl rounded-xl"
+            >
+              Retry
+            </button>
+          </div>
+        ) : orders.length === 0 ? (
           <div className="text-center py-16 sm:py-24">
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <Package className="w-12 h-12 text-gray-400" />

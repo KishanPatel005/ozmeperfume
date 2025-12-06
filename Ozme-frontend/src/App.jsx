@@ -27,7 +27,6 @@ import Shipping from './pages/Shipping';
 import FAQ from './pages/FAQ';
 import TrackOrder from './pages/TrackOrder';
 import SearchResults from './pages/SearchResults';
-import Orders from './pages/Orders';
 import { useState } from 'react';
 
 function App() {
@@ -135,11 +134,6 @@ function AppContent() {
           <Route path="/checkout" element={
             <ProtectedRoute>
               <Checkout />
-            </ProtectedRoute>
-          } />
-          <Route path="/orders" element={
-            <ProtectedRoute>
-              <Orders />
             </ProtectedRoute>
           } />
           <Route path="/track-order" element={
