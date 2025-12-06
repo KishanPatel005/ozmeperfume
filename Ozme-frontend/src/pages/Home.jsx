@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -9,7 +9,8 @@ import {
   Gift,
   Heart,
   ShoppingCart,
-  Eye
+  Eye,
+  Loader2
 } from 'lucide-react';
 import homeBg from '../assets/image/home1.png';
 import Testimonials from '../componets/Home/Testimonials';
@@ -18,6 +19,8 @@ import ProductModal from '../componets/Home/ProductDetails';
 import { filterProducts } from '../utils/filterProducts';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { apiRequest } from '../utils/api';
+import toast from 'react-hot-toast';
 
 
 export default function Home() {
@@ -28,81 +31,194 @@ export default function Home() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [hoveredProduct, setHoveredProduct] = useState(null);
   const [hoveredCollection, setHoveredCollection] = useState(null);
-  const { addToCart } = useCart();
-  const { toggleWishlist, isInWishlist } = useWishlist();
-
-
-  const products = [
-    {
-      id: 1,
-      name: 'Noir Elegance',
-      category: 'For Him',
-      price: 2499,
-      originalPrice: 4999,
-      image: 'https://images.unsplash.com/photo-1594035910387-fea47794261f?w=600&h=800&fit=crop',
-      rating: 4.9,
-      reviews: 234,
-      tag: 'Bestseller',
-      description: 'A sophisticated blend of woody and spicy notes, perfect for the modern gentleman. Features top notes of bergamot and cardamom, with a heart of leather and tobacco, finishing with warm amber and sandalwood.'
-    },
-    {
-      id: 2,
-      name: 'Rose Mystique',
-      category: 'For Her',
-      price: 2199,
-      originalPrice: 4499,
-      image: 'https://images.unsplash.com/photo-1541643600914-78b084683601?w=600&h=800&fit=crop',
-      rating: 4.8,
-      reviews: 189,
-      tag: 'New',
-      description: 'An enchanting floral fragrance that captures the essence of blooming roses at dawn. Delicate petals blend with soft jasmine and a hint of vanilla for an unforgettable feminine scent.'
-    },
-    {
-      id: 3,
-      name: 'Velvet Oud',
-      category: 'Unisex',
-      price: 2799,
-      originalPrice: 5499,
-      image: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=600&h=800&fit=crop',
-      rating: 5.0,
-      reviews: 312,
-      tag: 'Bestseller',
-      description: 'A luxurious oud fragrance that combines rich Middle Eastern heritage with modern elegance. Deep oud wood harmonizes with rose, saffron, and precious amber for a truly regal experience.'
-    },
-    {
-      id: 4,
-      name: 'Citrus Bliss',
-      category: 'For Her',
-      price: 1999,
-      originalPrice: 3999,
-      image: 'https://images.unsplash.com/photo-1587017539504-67cfbddac569?w=600&h=800&fit=crop',
-      rating: 4.7,
-      reviews: 156,
-      tag: 'Limited',
-      description: 'A refreshing citrus symphony that awakens your senses. Bright notes of orange, lemon, and grapefruit dance with fresh bergamot, creating an energizing and uplifting fragrance perfect for any time of day.'
-    }
-  ];
-
-  const collections = [
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [collections, setCollections] = useState([
     {
       name: 'Oriental',
       image: 'https://images.unsplash.com/photo-1615634260167-c8cdede054de?w=800&h=1000&fit=crop',
-      count: '48',
+      count: '0',
       description: 'Rich & Exotic'
     },
     {
       name: 'Floral',
       image: 'https://images.unsplash.com/photo-1595425970377-c9703cf48b6d?w=800&h=1000&fit=crop',
-      count: '56',
+      count: '0',
       description: 'Fresh & Romantic'
     },
     {
       name: 'Woody',
       image: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&h=1000&fit=crop',
-      count: '34',
+      count: '0',
       description: 'Warm & Earthy'
     }
-  ];
+  ]);
+  const { addToCart } = useCart();
+  const { toggleWishlist, isInWishlist } = useWishlist();
+
+  // Fetch bestseller/featured products
+  useEffect(() => {
+    fetchFeaturedProducts();
+    fetchCollections();
+  }, []);
+
+  const fetchFeaturedProducts = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch bestseller products (tag='Bestseller') or top rated products
+      // Limit to 8 products for homepage
+      const response = await apiRequest('/products?tag=Bestseller&limit=8');
+      
+      if (response && response.success) {
+        // Transform backend products to frontend format
+        const transformedProducts = response.data.products
+          .filter(product => product.active && product.inStock)
+          .slice(0, 8) // Limit to 8 products
+          .map(product => ({
+            id: product._id,
+            _id: product._id,
+            name: product.name,
+            category: product.gender === 'Men' ? 'For Him' : product.gender === 'Women' ? 'For Her' : 'Unisex',
+            price: product.price,
+            originalPrice: product.originalPrice || product.price,
+            image: product.images && product.images.length > 0 ? product.images[0] : 'https://via.placeholder.com/400x600?text=No+Image',
+            images: product.images || [],
+            rating: product.rating || 0,
+            reviews: product.reviewsCount || 0,
+            tag: product.tag || null,
+            description: product.description || product.shortDescription || '',
+            gender: product.gender?.toLowerCase() || 'unisex',
+            inStock: product.inStock,
+            stockQuantity: product.stockQuantity || 0,
+            size: product.size || '100ML'
+          }));
+
+        // If no bestsellers, fetch top rated products instead
+        if (transformedProducts.length === 0) {
+          const topRatedResponse = await apiRequest('/products?limit=8');
+          if (topRatedResponse && topRatedResponse.success) {
+            const topRated = topRatedResponse.data.products
+              .filter(product => product.active && product.inStock)
+              .slice(0, 8)
+              .map(product => ({
+                id: product._id,
+                _id: product._id,
+                name: product.name,
+                category: product.gender === 'Men' ? 'For Him' : product.gender === 'Women' ? 'For Her' : 'Unisex',
+                price: product.price,
+                originalPrice: product.originalPrice || product.price,
+                image: product.images && product.images.length > 0 ? product.images[0] : 'https://via.placeholder.com/400x600?text=No+Image',
+                images: product.images || [],
+                rating: product.rating || 0,
+                reviews: product.reviewsCount || 0,
+                tag: product.tag || null,
+                description: product.description || product.shortDescription || '',
+                gender: product.gender?.toLowerCase() || 'unisex',
+                inStock: product.inStock,
+                stockQuantity: product.stockQuantity || 0,
+                size: product.size || '100ML'
+              }))
+              .sort((a, b) => (b.rating || 0) - (a.rating || 0)); // Sort by rating
+            
+            setProducts(topRated);
+          }
+        } else {
+          setProducts(transformedProducts);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching featured products:', err);
+      toast.error('Failed to load featured products');
+      // Keep empty array on error - page will still render
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCollections = async () => {
+    try {
+      // Fetch products grouped by category to create collections
+      const response = await apiRequest('/products?limit=100');
+      
+      if (response && response.success) {
+        const productsData = response.data.products || [];
+        
+        // Group by category and create collections
+        const categoryMap = {};
+        productsData.forEach(product => {
+          if (product.category && product.active && product.inStock) {
+            if (!categoryMap[product.category]) {
+              categoryMap[product.category] = {
+                name: product.category,
+                count: 0,
+                image: product.images?.[0] || 'https://via.placeholder.com/800x1000?text=Collection'
+              };
+            }
+            categoryMap[product.category].count++;
+            // Use first product image as collection image if not set
+            if (!categoryMap[product.category].image && product.images?.[0]) {
+              categoryMap[product.category].image = product.images[0];
+            }
+          }
+        });
+
+        // Convert to array and add descriptions
+        const collectionsArray = Object.values(categoryMap)
+          .slice(0, 3) // Limit to 3 collections
+          .map((col, idx) => ({
+            ...col,
+            description: idx === 0 ? 'Rich & Exotic' : idx === 1 ? 'Fresh & Romantic' : 'Warm & Earthy',
+            count: col.count.toString()
+          }));
+
+        setCollections(collectionsArray.length > 0 ? collectionsArray : [
+          {
+            name: 'Oriental',
+            image: 'https://images.unsplash.com/photo-1615634260167-c8cdede054de?w=800&h=1000&fit=crop',
+            count: '48',
+            description: 'Rich & Exotic'
+          },
+          {
+            name: 'Floral',
+            image: 'https://images.unsplash.com/photo-1595425970377-c9703cf48b6d?w=800&h=1000&fit=crop',
+            count: '56',
+            description: 'Fresh & Romantic'
+          },
+          {
+            name: 'Woody',
+            image: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&h=1000&fit=crop',
+            count: '34',
+            description: 'Warm & Earthy'
+          }
+        ]);
+      }
+    } catch (err) {
+      console.error('Error fetching collections:', err);
+      // Use default collections on error
+      setCollections([
+        {
+          name: 'Oriental',
+          image: 'https://images.unsplash.com/photo-1615634260167-c8cdede054de?w=800&h=1000&fit=crop',
+          count: '48',
+          description: 'Rich & Exotic'
+        },
+        {
+          name: 'Floral',
+          image: 'https://images.unsplash.com/photo-1595425970377-c9703cf48b6d?w=800&h=1000&fit=crop',
+          count: '56',
+          description: 'Fresh & Romantic'
+        },
+        {
+          name: 'Woody',
+          image: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&h=1000&fit=crop',
+          count: '34',
+          description: 'Warm & Earthy'
+        }
+      ]);
+    }
+  };
 
   const features = [
     {
@@ -178,8 +294,18 @@ export default function Home() {
             </div>
 
             {/* Products Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-              {filterProducts(products, searchQuery).map((product) => (
+            {loading ? (
+              <div className="flex items-center justify-center py-24">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+                <span className="ml-3 text-gray-600">Loading products...</span>
+              </div>
+            ) : products.length === 0 ? (
+              <div className="text-center py-24">
+                <p className="text-gray-400 text-lg">No featured products available at the moment.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                {filterProducts(products, searchQuery).map((product) => (
                 <div
                   key={product.id}
                   className="group"
@@ -292,7 +418,8 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-            </div>
+              </div>
+            )}
 
             {/* View All Button */}
             <div className="text-center mt-16">

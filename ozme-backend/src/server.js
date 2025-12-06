@@ -22,6 +22,7 @@ import adminProductRoutes from './routes/adminProductRoutes.js';
 import adminOrderRoutes from './routes/adminOrderRoutes.js';
 import adminDashboardRoutes from './routes/adminDashboardRoutes.js';
 import adminCouponRoutes from './routes/adminCouponRoutes.js';
+import adminCategoryRoutes from './routes/adminCategoryRoutes.js';
 
 // Payment & Coupon Routes
 import paymentRoutes from './routes/paymentRoutes.js';
@@ -90,6 +91,7 @@ app.use('/api/admin/products', adminProductRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/coupons', adminCouponRoutes);
+app.use('/api/admin/categories', adminCategoryRoutes);
 
 // Error Handling Middleware
 app.use(notFound);

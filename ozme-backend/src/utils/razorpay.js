@@ -49,10 +49,27 @@ export const createRazorpayOrder = async (amount, orderId) => {
         return order;
     } catch (error) {
         console.error('Razorpay create order error:', error);
-        if (error.message.includes('not configured')) {
+        
+        // Handle different error structures from Razorpay
+        if (error.statusCode === 401 || (error.error && error.error.code === 'BAD_REQUEST_ERROR')) {
+            console.error('❌ Razorpay Authentication Failed!');
+            console.error('💡 Check your Razorpay credentials in .env:');
+            console.error(`   RAZORPAY_KEY_ID: ${process.env.RAZORPAY_KEY_ID ? '✓ Set' : '✗ Missing'}`);
+            console.error(`   RAZORPAY_KEY_SECRET: ${process.env.RAZORPAY_KEY_SECRET ? '✓ Set' : '✗ Missing'}`);
+            console.error('📝 Solution:');
+            console.error('   1. Go to: https://dashboard.razorpay.com');
+            console.error('   2. Go to: Settings → API Keys');
+            console.error('   3. Copy your Key ID and Key Secret');
+            console.error('   4. Update RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env');
+            throw new Error('Razorpay authentication failed. Please check your API keys in .env file.');
+        }
+        
+        if (error.message && error.message.includes('not configured')) {
             throw error;
         }
-        throw new Error('Failed to create Razorpay order: ' + error.message);
+        
+        const errorMessage = error.message || (error.error && error.error.description) || 'Unknown error';
+        throw new Error('Failed to create Razorpay order: ' + errorMessage);
     }
 };
 
@@ -101,10 +118,11 @@ export const fetchPaymentDetails = async (paymentId) => {
         return payment;
     } catch (error) {
         console.error('Razorpay fetch payment error:', error);
-        if (error.message.includes('not configured')) {
+        if (error.message && error.message.includes('not configured')) {
             throw error;
         }
-        throw new Error('Failed to fetch payment details: ' + error.message);
+        const errorMessage = error.message || (error.error && error.error.description) || 'Unknown error';
+        throw new Error('Failed to fetch payment details: ' + errorMessage);
     }
 };
 
@@ -122,10 +140,11 @@ export const createRefund = async (paymentId, amount = null) => {
         return refund;
     } catch (error) {
         console.error('Razorpay refund error:', error);
-        if (error.message.includes('not configured')) {
+        if (error.message && error.message.includes('not configured')) {
             throw error;
         }
-        throw new Error('Failed to create refund: ' + error.message);
+        const errorMessage = error.message || (error.error && error.error.description) || 'Unknown error';
+        throw new Error('Failed to create refund: ' + errorMessage);
     }
 };
 

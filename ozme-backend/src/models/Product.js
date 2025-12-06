@@ -4,13 +4,14 @@ import mongoose from 'mongoose';
  * Product Schema
  * @typedef {Object} Product
  * @property {string} name - Product name
- * @property {string} description - Product description
- * @property {number} price - Product price
- * @property {number} originalPrice - Original price (for discounts)
- * @property {string[]} images - Array of image URLs
- * @property {string} category - Product category
+ * @property {string} shortDescription - Short product description (for cards)
+ * @property {string} description - Full product description
+ * @property {number} price - Product price (selling price)
+ * @property {number} originalPrice - Original price/MRP (for discounts)
+ * @property {string[]} images - Array of image URLs (max 10)
+ * @property {string} category - Product category (from Category collection)
  * @property {string} gender - Target gender (Men/Women/Unisex)
- * @property {string} size - Product size (default: 100ml)
+ * @property {string} size - Product size (50ML, 100ML, 150ML, 200ML, 250ML, 300ML)
  * @property {number} rating - Average rating
  * @property {number} reviewsCount - Number of reviews
  * @property {string} tag - Product tag (Bestseller/New/Limited)
@@ -23,6 +24,11 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Product name is required'],
       trim: true,
+    },
+    shortDescription: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'Short description cannot exceed 200 characters'],
     },
     description: {
       type: String,
@@ -44,7 +50,8 @@ const productSchema = new mongoose.Schema(
     category: {
       type: String,
       required: [true, 'Product category is required'],
-      enum: ['Oriental', 'Floral', 'Woody', 'Fresh', 'Limited Edition'],
+      trim: true,
+      // Category will be validated against Category collection
     },
     gender: {
       type: String,
@@ -53,8 +60,8 @@ const productSchema = new mongoose.Schema(
     },
     size: {
       type: String,
-      default: '100ml',
-      enum: ['100ml'],
+      default: '100ML',
+      enum: ['50ML', '100ML', '150ML', '200ML', '250ML', '300ML'],
     },
     rating: {
       type: Number,

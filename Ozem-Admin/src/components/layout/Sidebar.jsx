@@ -9,7 +9,8 @@ import {
   Settings,
   ChevronRight,
   Sparkles,
-  LogOut
+  LogOut,
+  FolderTree
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +30,7 @@ const Sidebar = ({ isOpen, setIsOpen, toggleSidebar }) => {
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
+    { id: 'categories', label: 'Categories', icon: FolderTree, path: '/categories' },
     { id: 'products', label: 'Products', icon: Package, path: '/products' },
     { id: 'orders', label: 'Orders', icon: ShoppingCart, path: '/orders' },
     { id: 'inventory', label: 'Inventory', icon: Warehouse, path: '/inventory' },

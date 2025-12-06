@@ -5,7 +5,14 @@ import nodemailer from 'nodemailer';
  * @returns {Object} Nodemailer transporter
  */
 const createTransporter = () => {
-  if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  // Support both EMAIL_PASS and EMAIL_PASSWORD for compatibility
+  const emailPassword = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
+  
+  if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !emailPassword) {
+    console.log('Email configuration check:');
+    console.log(`  EMAIL_HOST: ${process.env.EMAIL_HOST ? '✓ Set' : '✗ Missing'}`);
+    console.log(`  EMAIL_USER: ${process.env.EMAIL_USER ? '✓ Set' : '✗ Missing'}`);
+    console.log(`  EMAIL_PASSWORD: ${emailPassword ? '✓ Set' : '✗ Missing'}`);
     return null; // Email not configured
   }
 
@@ -15,7 +22,7 @@ const createTransporter = () => {
     secure: false,
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
+      pass: emailPassword,
     },
   });
 };
@@ -50,6 +57,26 @@ export const sendEmail = async ({ to, subject, text, html }) => {
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('Email send error:', error);
+    
+    // Provide helpful error messages for common Gmail errors
+    if (error.code === 'EAUTH' || error.responseCode === 535) {
+      console.error('❌ Gmail Authentication Failed!');
+      console.error('💡 Common causes:');
+      console.error('   1. Using regular Gmail password instead of App Password');
+      console.error('   2. App Password is incorrect or expired');
+      console.error('   3. 2-Step Verification is not enabled');
+      console.error('📝 Solution:');
+      console.error('   1. Go to: https://myaccount.google.com/security');
+      console.error('   2. Enable 2-Step Verification (if not enabled)');
+      console.error('   3. Go to: Security → 2-Step Verification → App Passwords');
+      console.error('   4. Generate App Password for "Mail"');
+      console.error('   5. Update EMAIL_PASSWORD in .env with 16-character password (no spaces)');
+      return { 
+        success: false, 
+        error: 'Gmail authentication failed. Please use Gmail App Password (not regular password). See console for details.' 
+      };
+    }
+    
     return { success: false, error: error.message };
   }
 };

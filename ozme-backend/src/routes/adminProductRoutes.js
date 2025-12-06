@@ -1,31 +1,40 @@
 import express from 'express';
+import multer from 'multer';
 import {
   getAdminProducts,
   createAdminProduct,
   updateAdminProduct,
   deleteAdminProduct,
+  uploadProductImages,
 } from '../controllers/adminProductController.js';
 import { adminProtect } from '../middleware/adminAuthMiddleware.js';
-import { body } from 'express-validator';
-import { validateRequest } from '../middleware/validateRequest.js';
 
 const router = express.Router();
 
 // All routes require admin authentication
 router.use(adminProtect);
 
-const productValidation = [
-  body('name').notEmpty().withMessage('Product name is required'),
-  body('description').notEmpty().withMessage('Product description is required'),
-  body('price').isNumeric().withMessage('Price must be a number'),
-  body('images').isArray().withMessage('Images must be an array'),
-  body('category').isIn(['Oriental', 'Floral', 'Woody', 'Fresh', 'Limited Edition']).withMessage('Invalid category'),
-  body('gender').isIn(['Men', 'Women', 'Unisex']).withMessage('Invalid gender'),
-];
+// Configure multer for file uploads (store in memory)
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB per file
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  },
+});
 
 router.get('/', getAdminProducts);
-router.post('/', productValidation, validateRequest, createAdminProduct);
-router.put('/:id', productValidation, validateRequest, updateAdminProduct);
+router.post('/upload-images', upload.array('images', 10), uploadProductImages); // Keep for backward compatibility if needed
+router.post('/', upload.array('images', 10), createAdminProduct);
+router.put('/:id', upload.array('images', 10), updateAdminProduct);
 router.delete('/:id', deleteAdminProduct);
 
 export default router;

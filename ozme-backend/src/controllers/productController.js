@@ -18,8 +18,11 @@ export const getProducts = async (req, res) => {
       limit = 20,
     } = req.query;
 
-    // Build query
-    const query = {};
+    // Build query - only show active products to customers
+    const query = {
+      active: true,
+      inStock: true
+    };
 
     if (category) query.category = category;
     if (gender) query.gender = gender;
@@ -77,6 +80,14 @@ export const getProduct = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Product not found',
+      });
+    }
+
+    // Only show active products to customers (admin can view all via admin route)
+    if (!product.active || !product.inStock) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not available',
       });
     }
 

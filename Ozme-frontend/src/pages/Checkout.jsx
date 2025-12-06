@@ -262,67 +262,223 @@ export default function CheckoutPage() {
         return true;
     };
 
-    // Handle Cashfree online payment
+    // Handle Razorpay online payment
     const handleOnlinePayment = async () => {
         try {
             setIsProcessing(true);
+
+            // Check if user is authenticated
+            if (!isAuthenticated || !user) {
+                toast.error('Please login to place an order');
+                navigate('/login', { state: { from: '/checkout' } });
+                return;
+            }
+
+            // Check if cart is empty
+            if (cartItems.length === 0) {
+                toast.error('Your cart is empty');
+                navigate('/cart');
+                return;
+            }
+
+            // Filter and validate cart items - remove items with invalid IDs
+            const validCartItems = [];
+            const invalidCartItems = [];
             
-            // Create order with backend first
-            const orderResponse = await apiRequest('/payments/cashfree/create-order', {
+            cartItems.forEach(item => {
+                // Check if item.id is a valid MongoDB ObjectId (24 hex characters)
+                const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(item.id?.toString());
+                
+                if (isValidObjectId) {
+                    validCartItems.push(item);
+                } else {
+                    invalidCartItems.push(item);
+                    console.warn(`Invalid product ID in cart: ${item.id} for product: ${item.name}`);
+                }
+            });
+            
+            // If there are invalid items, remove them from cart and show error
+            if (invalidCartItems.length > 0) {
+                invalidCartItems.forEach(item => {
+                    removeFromCart(item.id);
+                });
+                
+                const invalidNames = invalidCartItems.map(item => item.name).join(', ');
+                toast.error(
+                    `Some items in your cart have invalid IDs and have been removed: ${invalidNames}. Please add them again from the shop.`,
+                    { duration: 6000 }
+                );
+                
+                if (validCartItems.length === 0) {
+                    setIsProcessing(false);
+                    navigate('/cart');
+                    return;
+                }
+                
+                toast.info(`Proceeding with ${validCartItems.length} valid item(s) in your cart.`, { duration: 4000 });
+            }
+            
+            // Check if we have any valid items left
+            if (validCartItems.length === 0) {
+                toast.error('Your cart is empty. Please add products from the shop.');
+                navigate('/cart');
+                return;
+            }
+            
+            // Map valid cart items to backend format
+            const orderItems = validCartItems.map(item => ({
+                productId: item.id.toString(),
+                quantity: item.quantity || 1,
+                size: item.size || '100ml',
+                price: item.price,
+            }));
+
+            // Prepare shipping address
+            const shippingAddress = {
+                firstName: formData.firstName,
+                lastName: formData.lastName,
+                name: `${formData.firstName} ${formData.lastName}`.trim(),
+                email: formData.email,
+                phone: formData.phone,
+                address: `${formData.address}${formData.apartment ? ', ' + formData.apartment : ''}`,
+                city: formData.city,
+                state: formData.state,
+                pincode: formData.pincode,
+                country: 'India',
+            };
+
+            // Step 1: Create order with backend first
+            const orderResponse = await apiRequest('/orders', {
                 method: 'POST',
                 body: JSON.stringify({
-                    amount: total,
-                    currency: 'INR',
-                    customerDetails: {
-                        customerId: user?.id || `guest_${Date.now()}`,
-                        customerName: `${formData.firstName} ${formData.lastName}`,
-                        customerEmail: formData.email,
-                        customerPhone: formData.phone,
-                    },
-                    orderMeta: {
-                        returnUrl: `${window.location.origin}/checkout/success`,
-                        notifyUrl: `${window.location.origin}/api/payments/cashfree/webhook`,
-                    },
-                    orderItems: cartItems.map(item => ({
-                        name: item.name,
-                        unitPrice: item.price,
-                        quantity: item.quantity,
-                    })),
+                    items: orderItems,
+                    shippingAddress: shippingAddress,
+                    paymentMethod: 'Prepaid',
+                    promoCode: null,
+                    discountAmount: 0,
+                    totalAmount: total,
                 }),
             });
 
             if (!orderResponse || !orderResponse.success) {
-                throw new Error(orderResponse?.message || 'Failed to create payment order');
+                throw new Error(orderResponse?.message || 'Failed to create order');
             }
 
-            const { paymentSessionId, orderToken } = orderResponse.data;
+            const backendOrder = orderResponse.data.order;
+            const orderId = backendOrder._id;
 
-            // Load Cashfree SDK dynamically
-            const script = document.createElement('script');
-            script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
-            script.onload = () => {
-                const cashfree = window.Cashfree({
-                    mode: import.meta.env.VITE_CASHFREE_MODE || 'sandbox', // 'sandbox' or 'production'
-                });
+            // Step 2: Create Razorpay payment order
+            const razorpayResponse = await apiRequest('/payments/razorpay/create-order', {
+                method: 'POST',
+                body: JSON.stringify({
+                    orderId: orderId,
+                    amount: total,
+                }),
+            });
 
-                cashfree.checkout({
-                    paymentSessionId: paymentSessionId,
-                    redirectTarget: '_self',
-                }).then((result) => {
-                    if (result.error) {
-                        throw new Error(result.error.message || 'Payment failed');
-                    }
-                    // Payment successful - will redirect to success page
-                }).catch((error) => {
-                    console.error('Cashfree checkout error:', error);
-                    toast.error(error.message || 'Payment failed. Please try again.');
+            if (!razorpayResponse || !razorpayResponse.success) {
+                throw new Error(razorpayResponse?.message || 'Failed to create payment order');
+            }
+
+            const { orderId: razorpayOrderId, amount: razorpayAmount, currency, keyId } = razorpayResponse.data;
+
+            // Step 3: Function to open Razorpay checkout
+            const openRazorpayCheckout = () => {
+                const options = {
+                    key: keyId,
+                    amount: razorpayAmount, // Amount is in paise (already converted by backend)
+                    currency: currency || 'INR',
+                    name: 'OZME Perfumes',
+                    description: `Order #${backendOrder.orderNumber}`,
+                    order_id: razorpayOrderId,
+                    handler: async function (response) {
+                        // Payment successful - verify payment signature
+                        try {
+                            setIsProcessing(true);
+                            
+                            const verifyResponse = await apiRequest('/payments/razorpay/verify', {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    razorpayOrderId: response.razorpay_order_id,
+                                    razorpayPaymentId: response.razorpay_payment_id,
+                                    razorpaySignature: response.razorpay_signature,
+                                    orderId: orderId,
+                                }),
+                            });
+
+                            if (verifyResponse && verifyResponse.success) {
+                                // Clear cart after successful payment
+                                clearCart();
+                                
+                                // Show success message
+                                toast.success('Payment successful! Your order has been placed.');
+                                
+                                // Redirect to track order page
+                                navigate('/track-order', {
+                                    state: {
+                                        orderId: orderId,
+                                        timestamp: Date.now(),
+                                    },
+                                });
+                            } else {
+                                throw new Error(verifyResponse?.message || 'Payment verification failed');
+                            }
+                        } catch (error) {
+                            console.error('Payment verification error:', error);
+                            toast.error(error.message || 'Payment verification failed. Please contact support.');
+                        } finally {
+                            setIsProcessing(false);
+                        }
+                    },
+                    prefill: {
+                        name: `${formData.firstName} ${formData.lastName}`,
+                        email: formData.email,
+                        contact: formData.phone,
+                    },
+                    notes: {
+                        order_id: orderId,
+                        order_number: backendOrder.orderNumber,
+                    },
+                    theme: {
+                        color: '#000000',
+                    },
+                    modal: {
+                        ondismiss: function() {
+                            // User closed the payment modal
+                            setIsProcessing(false);
+                            toast.info('Payment cancelled');
+                        },
+                    },
+                };
+
+                const razorpay = new window.Razorpay(options);
+                razorpay.on('payment.failed', function (response) {
+                    console.error('Payment failed:', response.error);
+                    toast.error(`Payment failed: ${response.error.description || response.error.reason || 'Unknown error'}`);
                     setIsProcessing(false);
                 });
+
+                razorpay.open();
             };
-            script.onerror = () => {
-                throw new Error('Failed to load Cashfree SDK');
-            };
-            document.body.appendChild(script);
+
+            // Step 4: Load Razorpay Checkout SDK and open payment window
+            // Check if script is already loaded
+            if (window.Razorpay) {
+                // SDK already loaded, proceed directly
+                openRazorpayCheckout();
+            } else {
+                // Load SDK
+                const script = document.createElement('script');
+                script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+                script.onload = () => {
+                    openRazorpayCheckout();
+                };
+                script.onerror = () => {
+                    setIsProcessing(false);
+                    toast.error('Failed to load Razorpay SDK. Please refresh the page and try again.');
+                };
+                document.body.appendChild(script);
+            }
 
         } catch (error) {
             console.error('Online payment error:', error);
@@ -520,53 +676,8 @@ export default function CheckoutPage() {
             if (paymentMethod === 'COD') {
                 await handleCODOrder();
             } else {
-                // Clear previous order state and localStorage
-                resetOrderState();
-                
-                // Generate fresh order ID for online payment
-                const orderId = generateOrderId();
-                const orderData = {
-                    orderId: orderId,
-                    orderDate: new Date().toISOString(),
-                    status: 'Processing',
-                    items: cartItems.map(item => ({
-                        id: item.id,
-                        name: item.name,
-                        image: item.image,
-                        price: item.price,
-                        quantity: item.quantity,
-                        size: item.size || '100ml',
-                        category: item.category || 'Perfume'
-                    })),
-                    shippingAddress: {
-                        firstName: formData.firstName,
-                        lastName: formData.lastName,
-                        email: formData.email,
-                        phone: formData.phone,
-                        address: formData.address,
-                        apartment: formData.apartment || '',
-                        city: formData.city,
-                        state: formData.state,
-                        pincode: formData.pincode,
-                    },
-                    paymentMethod: 'ONLINE',
-                    paymentStatus: 'Pending',
-                    subtotal: subtotal,
-                    shippingCost: shippingCost,
-                    totalAmount: total,
-                };
-                
-                // Store new order data in localStorage (overwrites any previous order)
-                localStorage.setItem('currentOrder', JSON.stringify(orderData));
-                
-                // Save order to order history
-                saveOrderToHistory(orderData);
-                
-                // Clear cart after order is placed
-                clearCart();
-                
-                // Redirect to track order page with a timestamp to force refresh
-                navigate('/track-order', { state: { orderId, timestamp: Date.now() } });
+                // Handle Razorpay online payment
+                await handleOnlinePayment();
             }
         }
     };
@@ -1223,7 +1334,7 @@ export default function CheckoutPage() {
                                                             </span>
                                                         </div>
                                                         <p className="text-sm text-gray-600">
-                                                            Pay securely with Cashfree
+                                                            Pay securely with Razorpay
                                                         </p>
                                                     </button>
                                                 </div>
@@ -1246,8 +1357,8 @@ export default function CheckoutPage() {
                                                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
                                                         <Shield className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                                                         <div>
-                                                            <p className="text-sm font-semibold text-amber-900 mb-1">Secure Payment via Cashfree</p>
-                                                            <p className="text-xs text-amber-700">You will be redirected to Cashfree's secure payment gateway to complete your transaction.</p>
+                                                            <p className="text-sm font-semibold text-amber-900 mb-1">Secure Payment via Razorpay</p>
+                                                            <p className="text-xs text-amber-700">You will be redirected to Razorpay's secure payment gateway to complete your transaction.</p>
                                                         </div>
                                                     </div>
                                                 </>
@@ -1318,7 +1429,7 @@ export default function CheckoutPage() {
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <p className="font-semibold text-gray-900">Online Payment via Cashfree</p>
+                                                        <p className="font-semibold text-gray-900">Online Payment via Razorpay</p>
                                                         <p className="text-sm text-gray-600">Secure payment gateway</p>
                                                     </>
                                                 )}

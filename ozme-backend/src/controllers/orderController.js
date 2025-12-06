@@ -135,8 +135,9 @@ export const createOrder = async (req, res) => {
 
     await order.populate('items.product user');
 
-    // Send confirmation email for COD orders
-    if (paymentMethod === 'COD' || (!paymentMethod || paymentMethod !== 'ONLINE')) {
+    // Send confirmation email ONLY for COD orders
+    // For Prepaid/Online orders, email will be sent after payment verification
+    if (paymentMethod === 'COD' || (!paymentMethod || paymentMethod.toUpperCase() === 'COD')) {
       try {
         await sendOrderConfirmationEmail(order, order.user);
       } catch (emailError) {
@@ -144,6 +145,7 @@ export const createOrder = async (req, res) => {
         // Don't fail the order if email fails
       }
     }
+    // Note: Prepaid orders will have email sent in paymentController after payment verification
 
     res.status(201).json({
       success: true,

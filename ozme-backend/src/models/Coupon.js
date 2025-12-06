@@ -172,7 +172,7 @@ couponSchema.methods.markAsUsed = async function (userId) {
 couponSchema.set('toJSON', { virtuals: true });
 
 // Indexes
-couponSchema.index({ code: 1 });
+// Note: code field already has unique: true which creates an index, so we don't need to create it again
 couponSchema.index({ status: 1, expiryDate: 1 });
 
 const Coupon = mongoose.model('Coupon', couponSchema);

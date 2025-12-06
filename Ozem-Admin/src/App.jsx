@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Sidebar from './components/layout/Sidebar';
 import Navbar from './components/layout/Navbar';
 import Dashboard from './pages/Dashboard';
+import Categories from './pages/Categories';
 import Products from './pages/Products';
 import AddProduct from './pages/AddProduct';
 import Orders from './pages/Orders';
@@ -71,6 +72,23 @@ function App() {
                   setSidebarOpen={setSidebarOpen}
                 >
                   <Dashboard />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/categories"
+            element={
+              <ProtectedRoute>
+                <AdminLayout
+                  darkMode={darkMode}
+                  setDarkMode={setDarkMode}
+                  toggleSidebar={toggleSidebar}
+                  sidebarOpen={sidebarOpen}
+                  setSidebarOpen={setSidebarOpen}
+                >
+                  <Categories />
                 </AdminLayout>
               </ProtectedRoute>
             }

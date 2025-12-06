@@ -1,12 +1,12 @@
 // ShopPage.jsx - Updated with Quick View functionality
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Filter, X, SlidersHorizontal, Star, Heart, ShoppingCart, Eye, Sparkles } from 'lucide-react';
-import { products, categories } from '../data/productData';
-import { filterProducts } from '../utils/filterProducts';
+import { Filter, X, SlidersHorizontal, Star, Heart, ShoppingCart, Eye, Sparkles, Loader2 } from 'lucide-react';
+import { apiRequest } from '../utils/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import toast from 'react-hot-toast';
 
 function ShopPage({ onProductClick, onQuickView }) {
   const [searchParams] = useSearchParams();
@@ -15,22 +15,114 @@ function ShopPage({ onProductClick, onQuickView }) {
   const { toggleWishlist, isInWishlist } = useWishlist();
   const [showFilters, setShowFilters] = useState(false);
   const [hoveredProduct, setHoveredProduct] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [categories, setCategories] = useState([]);
   const [filters, setFilters] = useState({
     category: 'all',
-    priceRange: [0, 2000],
+    priceRange: [0, 5000],
     rating: 0,
     gender: 'all',
     sortBy: 'popularity'
   });
 
-  // First filter by search query, then apply other filters
-  const searchFilteredProducts = filterProducts(products, searchQuery);
+  // Fetch products from backend
+  useEffect(() => {
+    fetchProducts();
+  }, [filters, searchQuery]);
 
-  const filteredProducts = searchFilteredProducts.filter(product => {
-    if (filters.category !== 'all' && product.gender !== filters.category) return false;
-    if (product.price < filters.priceRange[0] || product.price > filters.priceRange[1]) return false;
-    if (product.rating < filters.rating) return false;
-    if (filters.gender !== 'all' && product.gender !== filters.gender) return false;
+  // Extract unique categories from products
+  useEffect(() => {
+    if (products.length > 0) {
+      const uniqueCategories = [...new Set(products.map(p => p.category).filter(Boolean))];
+      setCategories(uniqueCategories.map((cat, idx) => ({
+        id: idx + 1,
+        name: cat,
+        slug: cat.toLowerCase().replace(/\s+/g, '-')
+      })));
+    }
+  }, [products]);
+
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Build query parameters for backend
+      const params = new URLSearchParams();
+      
+      // Apply filters
+      if (filters.category !== 'all') {
+        params.append('category', filters.category);
+      }
+      if (filters.gender !== 'all') {
+        params.append('gender', filters.gender.charAt(0).toUpperCase() + filters.gender.slice(1));
+      }
+      if (filters.priceRange[0] > 0) {
+        params.append('minPrice', filters.priceRange[0].toString());
+      }
+      if (filters.priceRange[1] < 5000) {
+        params.append('maxPrice', filters.priceRange[1].toString());
+      }
+      if (filters.rating > 0) {
+        params.append('minRating', filters.rating.toString());
+      }
+      if (searchQuery) {
+        params.append('search', searchQuery);
+      }
+
+      // Fetch all products (no pagination limit for now)
+      params.append('limit', '100');
+
+      const response = await apiRequest(`/products?${params.toString()}`);
+
+      if (response && response.success) {
+        // Transform backend products to frontend format
+        const transformedProducts = response.data.products
+          .filter(product => product.active && product.inStock) // Only show active, in-stock products
+          .map(product => ({
+            id: product._id,
+            _id: product._id,
+            name: product.name,
+            price: product.price,
+            originalPrice: product.originalPrice || product.price,
+            discount: product.originalPrice && product.price
+              ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+              : 0,
+            rating: product.rating || 0,
+            reviews: product.reviewsCount || 0,
+            category: product.category || '',
+            gender: product.gender?.toLowerCase() || 'unisex',
+            images: product.images && product.images.length > 0 ? product.images : ['https://via.placeholder.com/400x600?text=No+Image'],
+            tag: product.tag || null,
+            bestseller: product.tag === 'Bestseller',
+            description: product.description || '',
+            shortDescription: product.shortDescription || '',
+            inStock: product.inStock,
+            stockQuantity: product.stockQuantity || 0,
+            size: product.size || '100ML'
+          }));
+
+        setProducts(transformedProducts);
+      } else {
+        setError('Failed to load products');
+      }
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      setError(err.message || 'Failed to load products. Please try again later.');
+      toast.error('Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter products client-side for additional filtering (e.g., category dropdown)
+  const filteredProducts = products.filter(product => {
+    // Category filter (if using category dropdown instead of backend)
+    if (filters.category !== 'all' && product.category.toLowerCase() !== filters.category.toLowerCase()) {
+      return false;
+    }
     return true;
   });
 
@@ -38,9 +130,9 @@ function ShopPage({ onProductClick, onQuickView }) {
     switch (filters.sortBy) {
       case 'price-low': return a.price - b.price;
       case 'price-high': return b.price - a.price;
-      case 'rating': return b.rating - a.rating;
-      case 'newest': return b.id - a.id;
-      default: return b.reviews - a.reviews;
+      case 'rating': return (b.rating || 0) - (a.rating || 0);
+      case 'newest': return new Date(b._id) - new Date(a._id); // Sort by MongoDB ObjectId (timestamp)
+      default: return (b.reviews || 0) - (a.reviews || 0); // popularity = most reviews
     }
   });
 
@@ -51,7 +143,7 @@ function ShopPage({ onProductClick, onQuickView }) {
   };
 
   const resetFilters = () => setFilters({
-    category: 'all', priceRange: [0, 2000], rating: 0, gender: 'all', sortBy: 'popularity'
+    category: 'all', priceRange: [0, 5000], rating: 0, gender: 'all', sortBy: 'popularity'
   });
 
   return (
@@ -82,7 +174,7 @@ function ShopPage({ onProductClick, onQuickView }) {
               <div className="h-px w-24 sm:w-32 md:w-40 lg:w-48 bg-gradient-to-r from-transparent via-amber-300/60 to-transparent"></div>
             </div>
             <p className="text-sm sm:text-base md:text-lg text-white/80 max-w-2xl mx-auto leading-relaxed font-light px-2 sm:px-4 mb-8 sm:mb-10">
-              Explore our curated collection of {products.length} luxury fragrances
+              Explore our curated collection of luxury fragrances
             </p>
           </div>
         </div>
@@ -112,7 +204,7 @@ function ShopPage({ onProductClick, onQuickView }) {
                     <select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}
                       className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border-2 border-gray-200 focus:border-gray-900 focus:outline-none transition-all">
                       <option value="all">All Categories</option>
-                      {categories.map(cat => <option key={cat.id} value={cat.slug}>{cat.name}</option>)}
+                      {categories.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
                     </select>
                   </div>
                   {/* Gender Filter */}
@@ -137,8 +229,8 @@ function ShopPage({ onProductClick, onQuickView }) {
                       <div className="flex items-center justify-between text-xs sm:text-sm text-gray-600">
                         <span>₹{filters.priceRange[0]}</span><span>₹{filters.priceRange[1]}</span>
                       </div>
-                      <input type="range" min="0" max="2000" value={filters.priceRange[0]} onChange={(e) => handlePriceChange(0, e.target.value)} className="w-full" />
-                      <input type="range" min="0" max="2000" value={filters.priceRange[1]} onChange={(e) => handlePriceChange(1, e.target.value)} className="w-full" />
+                      <input type="range" min="0" max="5000" step="100" value={filters.priceRange[0]} onChange={(e) => handlePriceChange(0, e.target.value)} className="w-full" />
+                      <input type="range" min="0" max="5000" step="100" value={filters.priceRange[1]} onChange={(e) => handlePriceChange(1, e.target.value)} className="w-full" />
                     </div>
                   </div>
                   {/* Rating Filter */}
@@ -166,7 +258,9 @@ function ShopPage({ onProductClick, onQuickView }) {
                   <SlidersHorizontal className="w-4 h-4 sm:w-5 sm:h-5" />Filters
                 </button>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 sm:ml-auto w-full sm:w-auto">
-                  <span className="text-xs sm:text-sm text-gray-600 font-light text-center sm:text-left">{sortedProducts.length} Products</span>
+                  <span className="text-xs sm:text-sm text-gray-600 font-light text-center sm:text-left">
+                    {loading ? 'Loading...' : `${sortedProducts.length} Products`}
+                  </span>
                   <select value={filters.sortBy} onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}
                     className="w-full sm:w-auto px-3 sm:px-4 py-2 text-xs sm:text-sm border-2 border-gray-200 focus:border-gray-900 focus:outline-none">
                     <option value="popularity">Most Popular</option>
@@ -178,7 +272,19 @@ function ShopPage({ onProductClick, onQuickView }) {
                 </div>
               </div>
 
-              {sortedProducts.length === 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center py-24">
+                  <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+                  <span className="ml-3 text-gray-600">Loading products...</span>
+                </div>
+              ) : error ? (
+                <div className="text-center py-12 sm:py-16 md:py-24 px-4">
+                  <p className="text-base sm:text-lg md:text-xl text-red-500 mb-4 sm:mb-6 font-light">{error}</p>
+                  <button onClick={fetchProducts} className="px-6 sm:px-8 py-2.5 sm:py-3 text-sm sm:text-base border-2 border-gray-900 text-gray-900 font-semibold hover:bg-gray-900 hover:text-white transition-all">
+                    Try Again
+                  </button>
+                </div>
+              ) : sortedProducts.length === 0 ? (
                 <div className="text-center py-12 sm:py-16 md:py-24 px-4">
                   <p className="text-base sm:text-lg md:text-xl text-gray-400 mb-4 sm:mb-6 font-light">No products found matching your criteria</p>
                   <button onClick={resetFilters} className="px-6 sm:px-8 py-2.5 sm:py-3 text-sm sm:text-base border-2 border-gray-900 text-gray-900 font-semibold hover:bg-gray-900 hover:text-white transition-all">
