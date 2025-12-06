@@ -38,12 +38,12 @@ connectDB().catch((err) => {
 });
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3002;
 
 // Middleware
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5174',
-  process.env.ADMIN_CLIENT_URL || 'http://localhost:5175',
+  process.env.CLIENT_URL || 'http://82.112.231.165:3001',
+  process.env.ADMIN_CLIENT_URL || 'http://82.112.231.165:3003',
 ];
 
 app.use(cors({

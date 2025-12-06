@@ -3,8 +3,8 @@
  * Handles all API requests with error handling and token management
  */
 
-// Get API base URL from environment, default to localhost:5000/api
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Get API base URL from environment, default to production URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://82.112.231.165:3002/api';
 
 // Log API base URL on load (for debugging)
 if (import.meta.env.DEV) {

@@ -3,7 +3,7 @@
  * Can be used by frontend or for testing
  */
 
-const API_BASE_URL = process.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.VITE_API_BASE_URL || 'http://82.112.231.165:3002/api';
 
 /**
  * Make API request

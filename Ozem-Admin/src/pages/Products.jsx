@@ -554,7 +554,7 @@ const AddProductForm = ({ onBack, editingProduct, onSave }) => {
       });
 
       // Send request
-      const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/admin/products${editingProduct ? `/${editingProduct._id}` : ''}`;
+      const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://82.112.231.165:3002/api'}/admin/products${editingProduct ? `/${editingProduct._id}` : ''}`;
       const response = await fetch(apiUrl, {
         method: editingProduct ? 'PUT' : 'POST',
         headers: {
