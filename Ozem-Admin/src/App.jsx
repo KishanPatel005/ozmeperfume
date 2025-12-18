@@ -49,13 +49,13 @@ function App() {
 
   return (
     <AuthProvider>
-      <Router>
+      <Router basename="/admin">
         <Routes>
           {/* Public route */}
           <Route 
             path="/login" 
             element={
-              <Login onSuccess={() => window.location.href = '/'} />
+              <Login onSuccess={() => window.location.href = '/admin'} />
             } 
           />
           

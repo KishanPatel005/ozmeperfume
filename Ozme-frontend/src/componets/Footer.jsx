@@ -1,4 +1,4 @@
-import { Mail, Phone, MapPin, Facebook, Instagram, Heart } from 'lucide-react';
+import { Mail, Phone, MapPin, Facebook, Instagram } from 'lucide-react';
 import logo from '../assets/image/logo.png';  // Make sure this path is correct
 
 export default function Footer() {
@@ -220,9 +220,15 @@ export default function Footer() {
             </p>
 
             <div className="flex items-center gap-2 text-sm text-gray-400">
-              <span>Crafted with</span>
-              <Heart className="w-4 h-4 fill-red-500 text-red-500 animate-pulse" />
-              <span>in India</span>
+              <span>Designed & Developed by</span>
+              <a 
+                href="http://creativewebcrafters.site/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 transition-colors font-medium"
+              >
+                Creative WebCrafters
+              </a>
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
