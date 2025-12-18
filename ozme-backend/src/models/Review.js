@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
  * @property {number} rating - Rating (1-5)
  * @property {string} comment - Review comment
  * @property {string} userName - User's name (for display)
+ * @property {string} status - Review status (Pending, Approved, Hidden)
  */
 const reviewSchema = new mongoose.Schema(
   {
@@ -35,6 +36,11 @@ const reviewSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    status: {
+      type: String,
+      enum: ['Pending', 'Approved', 'Hidden'],
+      default: 'Pending',
+    },
   },
   {
     timestamps: true,
@@ -43,6 +49,12 @@ const reviewSchema = new mongoose.Schema(
 
 // Prevent duplicate reviews
 reviewSchema.index({ user: 1, product: 1 }, { unique: true });
+
+// Index for efficient filtering by status
+reviewSchema.index({ status: 1 });
+
+// Index for product reviews lookup
+reviewSchema.index({ product: 1, status: 1 });
 
 const Review = mongoose.model('Review', reviewSchema);
 

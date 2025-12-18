@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -13,38 +14,15 @@ import {
   ChevronRight,
   Download,
   Filter,
-  Calendar
+  Calendar,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
-
-// Dashboard Data
-const dashboardStats = {
-  totalSales: { value: '$45,231.89', trend: { positive: true, value: '+20.1%' } },
-  totalOrders: { value: '328', trend: { positive: true, value: '+12.5%' } },
-  pendingOrders: { value: '23', trend: { positive: false, value: '-5.2%' } },
-  shippedOrders: { value: '145', trend: { positive: true, value: '+8.3%' } },
-  deliveredOrders: { value: '142', trend: { positive: true, value: '+15.7%' } },
-  canceledOrders: { value: '18', trend: { positive: false, value: '-3.1%' } },
-  totalUsers: { value: '1,234', trend: { positive: true, value: '+18.2%' } },
-  totalProducts: { value: '456', trend: { positive: true, value: '+5.4%' } },
-};
-
-const recentOrders = [
-  { id: 'ORD-001', customer: 'John Doe', amount: '$234.50', status: 'Delivered', date: '2024-01-20' },
-  { id: 'ORD-002', customer: 'Jane Smith', amount: '$156.00', status: 'Shipped', date: '2024-01-20' },
-  { id: 'ORD-003', customer: 'Bob Johnson', amount: '$89.99', status: 'Pending', date: '2024-01-19' },
-  { id: 'ORD-004', customer: 'Alice Brown', amount: '$445.20', status: 'Processing', date: '2024-01-19' },
-  { id: 'ORD-005', customer: 'Charlie Wilson', amount: '$123.45', status: 'Delivered', date: '2024-01-18' },
-];
-
-const lowStockProducts = [
-  { id: 1, name: 'Wireless Mouse', sku: 'WM-001', stock: 5, threshold: 10 },
-  { id: 2, name: 'USB Cable', sku: 'UC-002', stock: 3, threshold: 15 },
-  { id: 3, name: 'Phone Case', sku: 'PC-003', stock: 8, threshold: 20 },
-  { id: 4, name: 'Screen Protector', sku: 'SP-004', stock: 2, threshold: 10 },
-];
+import { apiRequest } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
 
 // Stat Card Component
-const StatCard = ({ title, value, icon: Icon, gradient, trend }) => {
+const StatCard = ({ title, value, icon: Icon, gradient, trend, loading }) => {
   return (
     <div className="group relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl border border-amber-100/20 dark:border-amber-900/20 p-6 hover:shadow-2xl hover:shadow-amber-500/10 transition-all duration-300 shadow-lg">
       <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${gradient} opacity-5 rounded-full blur-2xl group-hover:opacity-10 transition-opacity`}></div>
@@ -52,8 +30,12 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend }) => {
       <div className="relative flex items-start justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">{title}</p>
-          <h3 className="text-3xl font-light text-gray-900 dark:text-white mb-3 tracking-tight">{value}</h3>
-          {trend && (
+          {loading ? (
+            <div className="h-9 w-24 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+          ) : (
+            <h3 className="text-3xl font-light text-gray-900 dark:text-white mb-3 tracking-tight">{value}</h3>
+          )}
+          {trend && !loading && (
             <div className="flex items-center gap-1">
               {trend.positive ? (
                 <TrendingUp className="w-4 h-4 text-emerald-500" />
@@ -63,7 +45,7 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend }) => {
               <span className={`text-sm font-semibold ${trend.positive ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {trend.value}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">vs last month</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">today</span>
             </div>
           )}
         </div>
@@ -77,21 +59,98 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend }) => {
 
 // Dashboard Component
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState({
+    summary: {
+      totalOrders: 0,
+      totalRevenue: 0,
+      totalUsers: 0,
+      todaysOrders: 0,
+      todaysRevenue: 0,
+    },
+    topProducts: [],
+    ordersByStatus: {},
+  });
+  const [recentOrders, setRecentOrders] = useState([]);
+  const [lowStockProducts, setLowStockProducts] = useState([]);
+
+  // Fetch dashboard data
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      // Fetch dashboard summary
+      const summaryResponse = await apiRequest('/admin/dashboard/summary');
+      if (summaryResponse?.success) {
+        setDashboardData(summaryResponse.data);
+      }
+
+      // Fetch recent orders
+      const ordersResponse = await apiRequest('/admin/orders?limit=5');
+      if (ordersResponse?.success) {
+        setRecentOrders(ordersResponse.data.orders || []);
+      }
+
+      // Fetch low stock products
+      const productsResponse = await apiRequest('/admin/products?limit=100');
+      if (productsResponse?.success) {
+        const products = productsResponse.data.products || [];
+        // Filter products with low stock (less than 10 units)
+        const lowStock = products
+          .filter(p => {
+            const totalStock = p.sizes?.reduce((sum, s) => sum + (s.stockQuantity || 0), 0) || p.stockQuantity || 0;
+            return totalStock < 10 && totalStock > 0;
+          })
+          .slice(0, 4)
+          .map(p => ({
+            id: p._id,
+            name: p.name,
+            sku: p._id.toString().slice(-6).toUpperCase(),
+            stock: p.sizes?.reduce((sum, s) => sum + (s.stockQuantity || 0), 0) || p.stockQuantity || 0,
+            threshold: 10,
+          }));
+        setLowStockProducts(lowStock);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const formatCurrency = (amount) => {
+    return `₹${(amount || 0).toLocaleString('en-IN')}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-IN', {
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
   const getStatusBadge = (status) => {
     const statusStyles = {
       'Delivered': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
       'Shipped': 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
       'Pending': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
       'Processing': 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800',
-      'Canceled': 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800',
+      'Cancelled': 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800',
     };
     
     return (
-      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${statusStyles[status]}`}>
+      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${statusStyles[status] || statusStyles['Pending']}`}>
         {status}
       </span>
     );
   };
+
+  const { summary, ordersByStatus } = dashboardData;
 
   return (
     <div className="p-6 lg:p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-amber-50/30 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 min-h-screen">
@@ -104,46 +163,47 @@ const Dashboard = () => {
           <p className="text-gray-600 dark:text-gray-400 font-light">Welcome back! Here's what's happening today.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-amber-100/20 dark:border-amber-900/20 rounded-xl hover:bg-amber-50 dark:hover:bg-gray-700 transition-all">
-            <Calendar className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Last 30 Days</span>
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-400 to-amber-600 text-white rounded-xl hover:shadow-lg hover:shadow-amber-500/25 transition-all">
-            <Download className="w-4 h-4" />
-            <span className="text-sm font-semibold">Export Report</span>
+          <button 
+            onClick={fetchDashboardData}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-amber-100/20 dark:border-amber-900/20 rounded-xl hover:bg-amber-50 dark:hover:bg-gray-700 transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Refresh</span>
           </button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1  md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Revenue"
-          value={dashboardStats.totalSales.value}
+          value={formatCurrency(summary.totalRevenue)}
           icon={DollarSign}
           gradient="from-amber-400 to-amber-600"
-          trend={dashboardStats.totalSales.trend}
+          trend={summary.todaysRevenue > 0 ? { positive: true, value: `+${formatCurrency(summary.todaysRevenue)}` } : null}
+          loading={loading}
         />
         <StatCard
           title="Total Orders"
-          value={dashboardStats.totalOrders.value}
+          value={summary.totalOrders?.toLocaleString() || '0'}
           icon={ShoppingCart}
           gradient="from-emerald-500 to-emerald-600"
-          trend={dashboardStats.totalOrders.trend}
+          trend={summary.todaysOrders > 0 ? { positive: true, value: `+${summary.todaysOrders}` } : null}
+          loading={loading}
         />
         <StatCard
           title="Pending Orders"
-          value={dashboardStats.pendingOrders.value}
+          value={(ordersByStatus?.Pending || 0).toLocaleString()}
           icon={Clock}
           gradient="from-orange-500 to-orange-600"
-          trend={dashboardStats.pendingOrders.trend}
+          loading={loading}
         />
         <StatCard
-          title="Shipped Orders"
-          value={dashboardStats.shippedOrders.value}
+          title="Processing Orders"
+          value={(ordersByStatus?.Processing || 0).toLocaleString()}
           icon={Truck}
           gradient="from-purple-500 to-pink-600"
-          trend={dashboardStats.shippedOrders.trend}
+          loading={loading}
         />
       </div>
 
@@ -151,31 +211,31 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Delivered Orders"
-          value={dashboardStats.deliveredOrders.value}
+          value={(ordersByStatus?.Delivered || 0).toLocaleString()}
           icon={CheckCircle}
           gradient="from-emerald-500 to-teal-600"
-          trend={dashboardStats.deliveredOrders.trend}
+          loading={loading}
         />
         <StatCard
-          title="Canceled Orders"
-          value={dashboardStats.canceledOrders.value}
-          icon={XCircle}
-          gradient="from-rose-500 to-pink-600"
-          trend={dashboardStats.canceledOrders.trend}
+          title="Shipped Orders"
+          value={(ordersByStatus?.Shipped || 0).toLocaleString()}
+          icon={Truck}
+          gradient="from-blue-500 to-cyan-600"
+          loading={loading}
         />
         <StatCard
           title="Total Customers"
-          value={dashboardStats.totalUsers.value}
+          value={summary.totalUsers?.toLocaleString() || '0'}
           icon={Users}
           gradient="from-blue-500 to-cyan-600"
-          trend={dashboardStats.totalUsers.trend}
+          loading={loading}
         />
         <StatCard
-          title="Total Products"
-          value={dashboardStats.totalProducts.value}
-          icon={Package}
-          gradient="from-orange-500 to-amber-600"
-          trend={dashboardStats.totalProducts.trend}
+          title="Cancelled Orders"
+          value={(ordersByStatus?.Cancelled || 0).toLocaleString()}
+          icon={XCircle}
+          gradient="from-rose-500 to-pink-600"
+          loading={loading}
         />
       </div>
 
@@ -191,43 +251,58 @@ const Dashboard = () => {
                 </h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Latest customer orders</p>
               </div>
-              <button className="p-2 hover:bg-amber-50 dark:hover:bg-gray-700 rounded-lg transition-all">
-                <Filter className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-amber-50/50 dark:bg-gray-900/50">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Order ID</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Customer</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Amount</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-amber-100/20 dark:divide-amber-900/20">
-                {recentOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-amber-50/50 dark:hover:bg-gray-700/50 transition-colors group">
-                    <td className="px-6 py-4">
-                      <span className="text-sm font-semibold text-gray-900 dark:text-white">{order.id}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-gray-700 dark:text-gray-300">{order.customer}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">{order.amount}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {getStatusBadge(order.status)}
-                    </td>
+          
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+            </div>
+          ) : recentOrders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+              <ShoppingCart className="w-12 h-12 mb-3 opacity-30" />
+              <p>No orders yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-amber-50/50 dark:bg-gray-900/50">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Order ID</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Customer</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Amount</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-amber-100/20 dark:divide-amber-900/20">
+                  {recentOrders.map((order) => (
+                    <tr key={order._id} className="hover:bg-amber-50/50 dark:hover:bg-gray-700/50 transition-colors group">
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {order.orderNumber || order._id.toString().slice(-8).toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{order.user?.name || 'Guest'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(order.totalAmount)}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {getStatusBadge(order.orderStatus)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          
           <div className="p-4 bg-amber-50/50 dark:bg-gray-900/50 border-t border-amber-100/20 dark:border-amber-900/20">
-            <button className="w-full py-2.5 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center justify-center gap-2 group">
+            <button 
+              onClick={() => navigate('/orders')}
+              className="w-full py-2.5 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center justify-center gap-2 group"
+            >
               View All Orders
               <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
@@ -251,25 +326,41 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
-          <div className="p-6 space-y-4">
-            {lowStockProducts.map((product) => (
-              <div key={product.id} className="group flex items-center justify-between p-4 bg-gradient-to-r from-rose-50 to-orange-50 dark:from-rose-900/10 dark:to-orange-900/10 rounded-xl border border-rose-200 dark:border-rose-800/30 hover:shadow-lg transition-all">
-                <div className="flex-1">
-                  <h4 className="text-sm font-bold text-gray-900 dark:text-white mb-1">{product.name}</h4>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">SKU: {product.sku}</p>
-                </div>
-                <div className="text-right">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">{product.stock}</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">units</span>
+          
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+            </div>
+          ) : lowStockProducts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+              <CheckCircle className="w-12 h-12 mb-3 text-emerald-400" />
+              <p className="text-emerald-600 font-medium">All products well stocked!</p>
+            </div>
+          ) : (
+            <div className="p-6 space-y-4">
+              {lowStockProducts.map((product) => (
+                <div key={product.id} className="group flex items-center justify-between p-4 bg-gradient-to-r from-rose-50 to-orange-50 dark:from-rose-900/10 dark:to-orange-900/10 rounded-xl border border-rose-200 dark:border-rose-800/30 hover:shadow-lg transition-all">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white mb-1 truncate">{product.name}</h4>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">SKU: {product.sku}</p>
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Min: {product.threshold}</p>
+                  <div className="text-right">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">{product.stock}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">units</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Min: {product.threshold}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+          
           <div className="p-4 bg-amber-50/50 dark:bg-gray-900/50 border-t border-amber-100/20 dark:border-amber-900/20">
-            <button className="w-full py-2.5 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center justify-center gap-2 group">
+            <button 
+              onClick={() => navigate('/inventory')}
+              className="w-full py-2.5 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center justify-center gap-2 group"
+            >
               Manage Inventory
               <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
@@ -281,3 +372,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

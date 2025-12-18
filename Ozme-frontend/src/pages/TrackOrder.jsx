@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation, useParams } from 'react-router-dom';
-import { CheckCircle2, Circle, Package, MapPin, FileText, X, Download, Search, Eye, Calendar, Clock, Truck, XCircle, CreditCard, Wallet, ArrowLeft } from 'lucide-react';
+import { CheckCircle2, Circle, Package, MapPin, FileText, X, Download, Search, Eye, Calendar, Clock, Truck, XCircle, CreditCard, Wallet, ArrowLeft, Star, Loader2 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import jsPDF from 'jspdf';
 
@@ -14,6 +14,14 @@ export default function TrackOrder() {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'detail'
+  
+  // Review Modal State
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewOrder, setReviewOrder] = useState(null);
+  const [reviewData, setReviewData] = useState({});
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewSuccess, setReviewSuccess] = useState(null);
+  const [reviewError, setReviewError] = useState(null);
 
   // Load all orders on mount
   useEffect(() => {
@@ -198,6 +206,108 @@ export default function TrackOrder() {
     setOrderData(null);
     setSearchTerm('');
     window.history.pushState({}, '', '/track-order');
+  };
+
+  // Open review modal for a delivered order
+  const openReviewModal = (order) => {
+    setReviewOrder(order);
+    // Initialize review data for each product in the order
+    const initialReviewData = {};
+    order.items?.forEach(item => {
+      initialReviewData[item.id] = {
+        rating: 0,
+        comment: '',
+        productName: item.name,
+        productImage: item.image,
+      };
+    });
+    setReviewData(initialReviewData);
+    setReviewSuccess(null);
+    setReviewError(null);
+    setShowReviewModal(true);
+  };
+
+  // Close review modal
+  const closeReviewModal = () => {
+    setShowReviewModal(false);
+    setReviewOrder(null);
+    setReviewData({});
+    setReviewSuccess(null);
+    setReviewError(null);
+  };
+
+  // Handle star rating click
+  const handleRatingClick = (productId, rating) => {
+    setReviewData(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        rating,
+      }
+    }));
+  };
+
+  // Handle comment change
+  const handleCommentChange = (productId, comment) => {
+    setReviewData(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        comment,
+      }
+    }));
+  };
+
+  // Submit reviews
+  const handleSubmitReviews = async () => {
+    // Check if at least one product has a rating
+    const productsWithRating = Object.entries(reviewData).filter(([, data]) => data.rating > 0);
+    
+    if (productsWithRating.length === 0) {
+      setReviewError('Please rate at least one product');
+      return;
+    }
+
+    setSubmittingReview(true);
+    setReviewError(null);
+    
+    let successCount = 0;
+    let errorMessages = [];
+
+    for (const [productId, data] of productsWithRating) {
+      try {
+        const response = await apiRequest('/reviews', {
+          method: 'POST',
+          body: JSON.stringify({
+            productId,
+            rating: data.rating,
+            comment: data.comment || '',
+          }),
+        });
+
+        if (response?.success) {
+          successCount++;
+        } else {
+          errorMessages.push(`${data.productName}: ${response?.message || 'Failed to submit'}`);
+        }
+      } catch (err) {
+        errorMessages.push(`${data.productName}: ${err.message || 'Failed to submit'}`);
+      }
+    }
+
+    setSubmittingReview(false);
+
+    if (successCount > 0) {
+      setReviewSuccess(`Successfully submitted ${successCount} review${successCount > 1 ? 's' : ''}! Thank you for your feedback.`);
+      // Close modal after 2 seconds on success
+      setTimeout(() => {
+        closeReviewModal();
+      }, 2500);
+    }
+
+    if (errorMessages.length > 0) {
+      setReviewError(errorMessages.join('\n'));
+    }
   };
 
   // Format order date
@@ -603,7 +713,7 @@ export default function TrackOrder() {
                         </div>
                       </div>
 
-                      {/* Total Amount & Action Button */}
+                      {/* Total Amount & Action Buttons */}
                       <div className="flex flex-col sm:items-end gap-4">
                         <div className="text-right">
                           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Amount</p>
@@ -611,16 +721,31 @@ export default function TrackOrder() {
                             ₹{order.totalAmount?.toLocaleString('en-IN') || '0'}
                           </p>
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewOrder(order);
-                          }}
-                          className="flex items-center justify-center gap-2 px-6 py-3 bg-black text-white font-semibold hover:bg-gray-900 transition-all duration-300 rounded-xl shadow-sm hover:shadow-md"
-                        >
-                          <Eye className="w-4 h-4" />
-                          View Details
-                        </button>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          {/* Write Review Button - Only for Delivered Orders */}
+                          {order.status === 'Delivered' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openReviewModal(order);
+                              }}
+                              className="flex items-center justify-center gap-2 px-5 py-3 bg-amber-500 text-white font-semibold hover:bg-amber-600 transition-all duration-300 rounded-xl shadow-sm hover:shadow-md"
+                            >
+                              <Star className="w-4 h-4" />
+                              Write Review
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewOrder(order);
+                            }}
+                            className="flex items-center justify-center gap-2 px-6 py-3 bg-black text-white font-semibold hover:bg-gray-900 transition-all duration-300 rounded-xl shadow-sm hover:shadow-md"
+                          >
+                            <Eye className="w-4 h-4" />
+                            View Details
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -684,6 +809,166 @@ export default function TrackOrder() {
             </div>
           )}
         </div>
+
+        {/* Review Modal for List View */}
+        {showReviewModal && reviewOrder && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+              {/* Backdrop */}
+              <div 
+                className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+                onClick={closeReviewModal}
+              />
+
+              {/* Modal */}
+              <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full mx-auto p-6 sm:p-8 z-10 max-h-[90vh] overflow-y-auto">
+                {/* Close Button */}
+                <button
+                  onClick={closeReviewModal}
+                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+
+                {/* Header */}
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Star className="w-8 h-8 text-amber-500" />
+                  </div>
+                  <h2 className="text-2xl font-semibold text-gray-900">Write a Review</h2>
+                  <p className="text-gray-600 mt-1">Share your experience with these products</p>
+                  <p className="text-sm text-gray-500 mt-2">Order: {reviewOrder.orderNumber || reviewOrder.orderId}</p>
+                </div>
+
+                {/* Success Message */}
+                {reviewSuccess && (
+                  <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                    <div className="flex items-center gap-2 text-green-700">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span className="font-medium">{reviewSuccess}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error Message */}
+                {reviewError && (
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <div className="flex items-start gap-2 text-red-700">
+                      <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      <span className="text-sm whitespace-pre-line">{reviewError}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Products to Review */}
+                {!reviewSuccess && (
+                  <div className="space-y-6">
+                    {reviewOrder.items?.map((item, index) => (
+                      <div key={item.id || index} className="border border-gray-200 rounded-xl p-4">
+                        {/* Product Info */}
+                        <div className="flex gap-4 mb-4">
+                          <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                            {item.image ? (
+                              <img
+                                src={item.image}
+                                alt={item.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Package className="w-6 h-6 text-gray-400" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-semibold text-gray-900 truncate">{item.name}</h4>
+                            <p className="text-sm text-gray-500">{item.size}</p>
+                          </div>
+                        </div>
+
+                        {/* Star Rating */}
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Your Rating
+                          </label>
+                          <div className="flex gap-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => handleRatingClick(item.id, star)}
+                                className="p-1 transition-transform hover:scale-110"
+                              >
+                                <Star
+                                  className={`w-8 h-8 ${
+                                    star <= (reviewData[item.id]?.rating || 0)
+                                      ? 'text-amber-400 fill-amber-400'
+                                      : 'text-gray-300'
+                                  }`}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Comment */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Your Review (Optional)
+                          </label>
+                          <textarea
+                            value={reviewData[item.id]?.comment || ''}
+                            onChange={(e) => handleCommentChange(item.id, e.target.value)}
+                            placeholder="Share your thoughts about this product..."
+                            rows={3}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Submit Button */}
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={closeReviewModal}
+                        className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition-all duration-300 rounded-xl"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSubmitReviews}
+                        disabled={submittingReview}
+                        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-amber-500 text-white font-semibold hover:bg-amber-600 transition-all duration-300 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {submittingReview ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Submitting...
+                          </>
+                        ) : (
+                          <>
+                            <Star className="w-5 h-5" />
+                            Submit Review
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Close Button After Success */}
+                {reviewSuccess && (
+                  <button
+                    onClick={closeReviewModal}
+                    className="w-full px-6 py-3 bg-black text-white font-semibold hover:bg-gray-900 transition-all duration-300 rounded-xl"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -987,9 +1272,182 @@ export default function TrackOrder() {
                 <span className="font-medium text-gray-900">{formatOrderDate(orderData.orderDate)}</span>
               </div>
             </div>
+            
+            {/* Write Review Button for Detail View - Only for Delivered Orders */}
+            {orderData.status === 'Delivered' && (
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => openReviewModal(orderData)}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-amber-500 text-white font-semibold hover:bg-amber-600 transition-all duration-300 rounded-xl shadow-sm hover:shadow-md"
+                >
+                  <Star className="w-5 h-5" />
+                  Write a Review
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Review Modal */}
+      {showReviewModal && reviewOrder && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+            {/* Backdrop */}
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+              onClick={closeReviewModal}
+            />
+
+            {/* Modal */}
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full mx-auto p-6 sm:p-8 z-10 max-h-[90vh] overflow-y-auto">
+              {/* Close Button */}
+              <button
+                onClick={closeReviewModal}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+
+              {/* Header */}
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Star className="w-8 h-8 text-amber-500" />
+                </div>
+                <h2 className="text-2xl font-semibold text-gray-900">Write a Review</h2>
+                <p className="text-gray-600 mt-1">Share your experience with these products</p>
+                <p className="text-sm text-gray-500 mt-2">Order: {reviewOrder.orderNumber || reviewOrder.orderId}</p>
+              </div>
+
+              {/* Success Message */}
+              {reviewSuccess && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="font-medium">{reviewSuccess}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Message */}
+              {reviewError && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="flex items-start gap-2 text-red-700">
+                    <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span className="text-sm whitespace-pre-line">{reviewError}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Products to Review */}
+              {!reviewSuccess && (
+                <div className="space-y-6">
+                  {reviewOrder.items?.map((item, index) => (
+                    <div key={item.id || index} className="border border-gray-200 rounded-xl p-4">
+                      {/* Product Info */}
+                      <div className="flex gap-4 mb-4">
+                        <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Package className="w-6 h-6 text-gray-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-gray-900 truncate">{item.name}</h4>
+                          <p className="text-sm text-gray-500">{item.size}</p>
+                        </div>
+                      </div>
+
+                      {/* Star Rating */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Your Rating
+                        </label>
+                        <div className="flex gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => handleRatingClick(item.id, star)}
+                              className="p-1 transition-transform hover:scale-110"
+                            >
+                              <Star
+                                className={`w-8 h-8 ${
+                                  star <= (reviewData[item.id]?.rating || 0)
+                                    ? 'text-amber-400 fill-amber-400'
+                                    : 'text-gray-300'
+                                }`}
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Comment */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Your Review (Optional)
+                        </label>
+                        <textarea
+                          value={reviewData[item.id]?.comment || ''}
+                          onChange={(e) => handleCommentChange(item.id, e.target.value)}
+                          placeholder="Share your thoughts about this product..."
+                          rows={3}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Submit Button */}
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      onClick={closeReviewModal}
+                      className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition-all duration-300 rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSubmitReviews}
+                      disabled={submittingReview}
+                      className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-amber-500 text-white font-semibold hover:bg-amber-600 transition-all duration-300 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {submittingReview ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <Star className="w-5 h-5" />
+                          Submit Review
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Close Button After Success */}
+              {reviewSuccess && (
+                <button
+                  onClick={closeReviewModal}
+                  className="w-full px-6 py-3 bg-black text-white font-semibold hover:bg-gray-900 transition-all duration-300 rounded-xl"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
